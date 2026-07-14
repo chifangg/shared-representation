@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { FileText, FileX } from "lucide-react";
 import type { ToolResultProps } from "@/core/tools/registry";
+import { logEvent } from "@/core/interactionLog";
 
 type Result =
   | {
@@ -22,13 +24,21 @@ type Result =
  * paths to help the user spot misspellings.
  */
 export function ReadProjectFileResultCard({ content }: ToolResultProps<Result>) {
-  if (!content || typeof content !== "object") {
-    return (
-      <div className="rounded-md border border-[#E0E0E0] bg-[#FAFAFA] px-3 py-1.5 text-xs text-[#666666]">
-        Tool returned no parseable result.
-      </div>
-    );
-  }
+  const unparseable = !content || typeof content !== "object";
+  // Non-JSON results are transient bridge/CLI hiccups (persisted-output
+  // rewrite, stale session after a backend restart) that Claude recovers
+  // from by retrying; rendering them only alarms participants. Log
+  // silently for diagnosis and show nothing.
+  useEffect(() => {
+    if (unparseable) {
+      logEvent(
+        "tool-result-unparseable",
+        { card: "read_project_file" },
+        "system",
+      );
+    }
+  }, [unparseable]);
+  if (unparseable) return null;
 
   if (!content.ok) {
     return (

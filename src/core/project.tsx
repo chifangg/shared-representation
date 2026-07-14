@@ -2,7 +2,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
   type ChangeEvent,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 import { Highlight, themes, type Language } from "prism-react-renderer";
 import Editor from "react-simple-code-editor";
+import { logEvent, setLogContext } from "@/core/interactionLog";
 
 /**
  * Client-side project upload + display, used by the Files and Code
@@ -116,12 +119,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [chatRunning, setChatRunning] = useState(false);
   const [projectKey, setProjectKey] = useState(0);
 
+  // Stamp interaction-log rows with the project boundary (bumps only
+  // on user upload/reset, never on Claude's mid-turn writes).
+  useEffect(() => {
+    setLogContext({ projectKey });
+  }, [projectKey]);
+
   const activeFile = useMemo(
     () => files.find((f) => f.path === activePath) ?? null,
     [files, activePath],
   );
 
   const loadFiles = useCallback((entries: FileEntry[]) => {
+    logEvent("project-upload", {
+      fileCount: entries.length,
+      totalBytes: entries.reduce((n, f) => n + f.size, 0),
+    });
     setFiles(entries);
     setOpenPaths([]);
     setActivePath(null);
@@ -141,15 +154,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openFile = useCallback((path: string) => {
+    logEvent("file-open", { path });
     setOpenPaths((prev) => (prev.includes(path) ? prev : [...prev, path]));
     setActivePath(path);
   }, []);
 
   const setActive = useCallback((path: string) => {
+    logEvent("code-tab-activate", { path });
     setActivePath(path);
   }, []);
 
   const closeFile = useCallback((path: string) => {
+    logEvent("code-tab-close", { path });
     setOpenPaths((prev) => {
       const idx = prev.indexOf(path);
       if (idx === -1) return prev;
@@ -180,10 +196,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleHighlight = useCallback(() => {
+    logEvent("highlight-toggle");
     setHighlightEnabled((v) => !v);
   }, []);
 
   const reset = useCallback(() => {
+    logEvent("project-reset");
     setFiles([]);
     setOpenPaths([]);
     setActivePath(null);
@@ -562,7 +580,13 @@ function TreeNodeView({
     return (
       <div>
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => {
+            logEvent("file-tree-folder-toggle", {
+              path: node.path,
+              expanded: !expanded,
+            });
+            setExpanded(!expanded);
+          }}
           className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-white/10"
           style={{ paddingLeft: depth * 12 + 4 }}
         >
@@ -719,6 +743,8 @@ export function CodeViewer() {
     );
   }
 
+  // One code-edit log per typing burst; raw keystrokes are noise.
+  const codeEditLogTimer = useRef<number | null>(null);
   const lang = languageFromPath(activeFile.path);
 
   const highlight = highlightEnabled
@@ -743,7 +769,16 @@ export function CodeViewer() {
     <div className="h-full overflow-auto">
       <Editor
         value={activeFile.content}
-        onValueChange={(value) => updateFileContent(activeFile.path, value)}
+        onValueChange={(value) => {
+          updateFileContent(activeFile.path, value);
+          if (codeEditLogTimer.current !== null) {
+            window.clearTimeout(codeEditLogTimer.current);
+          }
+          const path = activeFile.path;
+          codeEditLogTimer.current = window.setTimeout(() => {
+            logEvent("code-edit", { path });
+          }, 1500);
+        }}
         highlight={highlight}
         padding={12}
         tabSize={2}

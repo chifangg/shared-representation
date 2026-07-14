@@ -293,12 +293,22 @@ export type BubbleSectorNodeData = {
 export type MiniNodeData = {
   label: string;
   caption: string;
-  files: string[];
+  /** Raw function/method names. Used only as the "features" fallback when a
+   *  detail block carries no capabilities. Files are intentionally NOT part
+   *  of this shape: a file count carries no signal in the mini graph. */
   functions: string[];
+  /** Plain-language sub-capabilities. Shown as the block's "features"
+   *  count/list. */
+  capabilities?: string[];
   isGhost: boolean;
   isPromoted: boolean;
   isSelected: boolean;
   block: DiagramBlock | null;
   onPromote: ((b: DiagramBlock) => void) | null;
   onUnpromote: ((b: DiagramBlock) => void) | null;
+  /** Category fill + accent for a ghost (on-canvas) node, so it re-stamps
+   *  in the block's own colour instead of a generic amber. Absent = fall
+   *  back to a neutral tint. */
+  tint?: string;
+  accent?: string;
 };

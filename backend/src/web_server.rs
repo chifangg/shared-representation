@@ -182,6 +182,39 @@ pub async fn create_web_server(
             "/api/block-refresh",
             axum::routing::post(crate::diagram::block_refresh),
         )
+        // Batch ingest for the interaction log (user-study telemetry).
+        // Fire-and-forget from the frontend; rows keyed by guest cookie.
+        .route(
+            "/api/log",
+            axum::routing::post(crate::logging::ingest_interaction_log),
+        )
+        // Researcher-facing log viewer + its admin endpoints (filter,
+        // delete, label). Gated by APP_LOG_ADMIN_TOKEN when set.
+        .route("/logs", get(crate::logging::logs_page))
+        .route(
+            "/api/log/query",
+            get(crate::logging::query_interaction_log),
+        )
+        .route(
+            "/api/log/{id}",
+            axum::routing::delete(crate::logging::delete_interaction_log_row),
+        )
+        .route(
+            "/api/log/{id}/label",
+            axum::routing::post(crate::logging::label_interaction_log_row),
+        )
+        .route(
+            "/api/log/session/{sid}/participant",
+            axum::routing::post(crate::logging::assign_session_participant),
+        )
+        .route(
+            "/api/log/sessions",
+            get(crate::logging::list_log_sessions),
+        )
+        .route(
+            "/api/log/session/{sid}",
+            axum::routing::delete(crate::logging::delete_log_session),
+        )
         // Internal: called by the tool-bridge subprocess via loopback only.
         // Protected by the per-spawn X-Tool-Bridge-Secret header.
         .route(

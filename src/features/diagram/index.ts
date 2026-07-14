@@ -8,7 +8,6 @@
 
 // Components rendered by AppShell.
 export { DiagramCanvas } from "./components/DiagramCanvas";
-export { DiagramViewSwitcher } from "./components/DiagramViewSwitcher";
 
 // Provider mounted by App.tsx and the subscribe hook ChatView uses
 // to receive the diagram's visual-edit prompts.

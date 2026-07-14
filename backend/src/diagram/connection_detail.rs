@@ -127,16 +127,7 @@ is nothing genuinely non-obvious. Do NOT restate the summaries.\n\
         "messages": [ { "role": "user", "content": prompt } ]
     });
 
-    let client = reqwest::Client::new();
-    let resp = match client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-    {
+    let resp = match crate::core::anthropic::post_messages(&api_key, &body).await {
         Ok(r) => r,
         Err(e) => {
             return Json(ApiResponse::error(format!("anthropic request failed: {e}")))

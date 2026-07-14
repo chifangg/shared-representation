@@ -6,6 +6,7 @@ import {
   type GroupImperativeHandle,
 } from "react-resizable-panels";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { logEvent } from "@/core/interactionLog";
 import { ChatView } from "@/core/components/ChatView";
 import {
   CodeTabs,
@@ -16,11 +17,7 @@ import {
   UploadOverlay,
   useProject,
 } from "@/core/project";
-import {
-  DiagramCanvas,
-  DiagramViewSwitcher,
-  type DiagramView,
-} from "@/features/diagram";
+import { DiagramCanvas, type DiagramView } from "@/features/diagram";
 
 export function AppShell() {
   const groupRef = useRef<GroupImperativeHandle | null>(null);
@@ -40,6 +37,7 @@ export function AppShell() {
   });
 
   const toggle = () => {
+    logEvent("panels-toggle", { show: !showFileCode });
     setAnimating(true);
     if (showFileCode) {
       const layout = groupRef.current?.getLayout() ?? {};
@@ -185,10 +183,13 @@ function DiagramPanel() {
           ref={setHeaderSlot}
           className="flex min-w-0 flex-1 items-center justify-center"
         />
-        <DiagramViewSwitcher view={view} onChange={setView} />
       </div>
       <div className="min-h-0 flex-1">
-        <DiagramCanvas view={view} headerSlot={headerSlot} />
+        <DiagramCanvas
+          view={view}
+          onViewChange={setView}
+          headerSlot={headerSlot}
+        />
       </div>
     </div>
   );

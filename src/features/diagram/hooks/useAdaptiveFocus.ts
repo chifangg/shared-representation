@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FileEntry } from "@/core/project";
 import type { ClaudeMessage } from "@/core/hooks/useClaudeSession";
 import type {
@@ -55,12 +49,15 @@ export function useAdaptiveFocus({
   projectKey: number;
 }): {
   focused: FocusState | null;
-  setFocused: Dispatch<SetStateAction<FocusState | null>>;
   regenerating: boolean;
-  setRegenerating: Dispatch<SetStateAction<boolean>>;
+  emptyRound: boolean;
 } {
   const [focused, setFocused] = useState<FocusState | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  // True once a round has COMPLETED with nothing to show (no focus ids and no
+  // detail blocks) or after a fetch error. Lets the panel tell "you haven't
+  // asked yet" (welcome) apart from "asked, but nothing came back".
+  const [emptyRound, setEmptyRound] = useState(false);
 
   // Capture the freshest chat messages without retriggering the
   // debounced fetch effect on every assistant chunk.
@@ -73,6 +70,7 @@ export function useAdaptiveFocus({
   useEffect(() => {
     setFocused(null);
     setRegenerating(false);
+    setEmptyRound(false);
   }, [projectKey]);
 
   // Count completed user turns. A turn increment signals "user just
@@ -90,6 +88,16 @@ export function useAdaptiveFocus({
     lastUserCountRef.current = userMessageCount;
     if (userMessageCount === 0) return;
 
+    // Open the side panel in its loading state IMMEDIATELY (before the
+    // debounce + stream), so switching into adaptive focus animates the
+    // panel open right away instead of waiting for the first detail block.
+    // `regenerating` now stays true for the WHOLE stream (it is NOT flipped
+    // off on the first block) so the panel can show a live "generating · N"
+    // count and the user knows when the round has actually finished.
+    setRegenerating(true);
+    setEmptyRound(false);
+    setFocused({ ids: [], blocks: [], arrows: [] });
+
     const controller = new AbortController();
     const debounceTimer = window.setTimeout(() => {
       const projectContext = buildProjectContext(files, null);
@@ -101,7 +109,6 @@ export function useAdaptiveFocus({
           caption: b.caption,
         })),
       });
-      setRegenerating(true);
 
       const newDetailBlocks: DiagramBlock[] = [];
       const newDetailArrows: DiagramArrow[] = [];
@@ -116,12 +123,14 @@ export function useAdaptiveFocus({
             signal: controller.signal,
             onEvent: (evt) => {
               if (evt.kind === "focus") {
-                // Accumulate ids but DON'T replace `focused` yet — if
-                // the previous turn had detail blocks visible, blowing
-                // them away the moment a new focus arrives makes the
-                // panel flash empty. Wait for the first detail_block
-                // (or stream end) to commit the swap.
                 newFocusedIds.push(...evt.ids);
+                // Commit the highlighted ids right away so the panel
+                // header names what it is focusing on during loading.
+                setFocused({
+                  ids: [...newFocusedIds],
+                  blocks: [...newDetailBlocks],
+                  arrows: [...newDetailArrows],
+                });
               } else if (evt.kind === "detail_block") {
                 newDetailBlocks.push(evt.data);
                 setFocused({
@@ -129,7 +138,6 @@ export function useAdaptiveFocus({
                   blocks: [...newDetailBlocks],
                   arrows: [...newDetailArrows],
                 });
-                setRegenerating(false);
               } else if (evt.kind === "detail_arrow") {
                 newDetailArrows.push(evt.data);
                 setFocused({
@@ -142,8 +150,6 @@ export function useAdaptiveFocus({
           });
           if (controller.signal.aborted) return;
           // Edge: focus event arrived but no detail_block ever did.
-          // Commit at least the new ids so the panel reflects the new
-          // turn rather than appearing stuck on the previous topic.
           if (newDetailBlocks.length === 0 && newFocusedIds.length > 0) {
             setFocused({
               ids: [...newFocusedIds],
@@ -151,9 +157,15 @@ export function useAdaptiveFocus({
               arrows: [],
             });
           }
+          // The round finished with genuinely nothing to show: mark it so the
+          // panel shows "nothing related" rather than the first-run welcome.
+          if (newDetailBlocks.length === 0 && newFocusedIds.length === 0) {
+            setEmptyRound(true);
+          }
           setRegenerating(false);
         } catch {
           if (controller.signal.aborted) return;
+          setEmptyRound(true);
           setRegenerating(false);
         }
       })();
@@ -162,9 +174,12 @@ export function useAdaptiveFocus({
     return () => {
       window.clearTimeout(debounceTimer);
       controller.abort();
+      // Torn down before the round finished (view switch away): don't
+      // leave the panel stuck in its loading state.
+      setRegenerating(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userMessageCount, view, files.length]);
 
-  return { focused, setFocused, regenerating, setRegenerating };
+  return { focused, regenerating, emptyRound };
 }

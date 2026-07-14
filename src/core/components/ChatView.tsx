@@ -13,6 +13,7 @@ import {
 } from "@/core/chatContext";
 import { useChatContextDropZone } from "@/core/chatContextDrag";
 import { useChatActivity } from "@/core/chatActivity";
+import { logEvent, setLogContext } from "@/core/interactionLog";
 import { ThinkingBubble } from "@/core/components/ThinkingBubble";
 import { Markdown } from "@/core/components/Markdown";
 import {
@@ -64,7 +65,14 @@ export function ChatView({ model }: { model?: string }) {
     setChatRunning(running);
   }, [running, setChatRunning]);
 
+  // Stamp interaction-log rows with the conversation id so analysis
+  // can join them onto the persisted transcript.
+  useEffect(() => {
+    setLogContext({ sessionId: session.sessionId });
+  }, [session.sessionId]);
+
   const handleNewChat = () => {
+    logEvent("chat-new", { messages: session.messages.length });
     session.reset();
     clearActivity();
   };
@@ -86,12 +94,18 @@ export function ChatView({ model }: { model?: string }) {
   const [contextItems, setContextItems] = useState<ChatContextItem[]>([]);
 
   const handleUserSubmit = (text: string) => {
+    logEvent("chat-send", {
+      promptLength: text.length,
+      contextChips: contextItems.length,
+      firstTurn: session.messages.length === 0,
+    });
     handleSend(appendContextToPrompt(text, contextItems));
     setContextItems([]);
   };
 
   // Register the input area as a drop zone for the custom pointer drag.
   const { ref: dropRef, dragging } = useChatContextDropZone((item) => {
+    logEvent("context-drop", { kind: item.kind, label: item.label });
     setContextItems((prev) =>
       prev.some((p) => p.id === item.id) ? prev : [...prev, item],
     );
@@ -299,7 +313,10 @@ export function ChatView({ model }: { model?: string }) {
 
       <PromptInput
         onSubmit={handleUserSubmit}
-        onCancel={session.cancel}
+        onCancel={() => {
+          logEvent("chat-cancel");
+          session.cancel();
+        }}
         disabled={running || !hasFiles}
         running={running}
         attachments={
@@ -454,10 +471,10 @@ function TurnBubble({
       return (
         <div className="flex items-start justify-end gap-2">
           <div
-            className="inline-flex max-w-[82%] flex-col gap-1.5 rounded-[10px] bg-[#ABA69C] px-3.5 py-2.5"
+            className="inline-flex max-w-[82%] flex-col gap-1.5 rounded-[10px] bg-[#BAB5AB] px-3.5 py-2.5"
             style={{
               boxShadow:
-                "inset 0 2px 4px rgba(40,35,28,0.28), inset 0 -1px 0 rgba(255,255,255,0.30)",
+                "inset 0 2px 4px rgba(40,35,28,0.22), inset 0 -1px 0 rgba(255,255,255,0.30)",
             }}
           >
             <span className="text-[10.5px] font-semibold uppercase tracking-wide text-[#2A251D]">
@@ -520,7 +537,7 @@ function TurnBubble({
                 ))}
               </div>
             )}
-            <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[14px] leading-relaxed text-[#EFE9DD]">
+            <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[14px] leading-snug text-[#EFE9DD]">
               {userText}
             </div>
           </div>
@@ -594,10 +611,10 @@ function AssistantBlockView({
         <ArrowsAddedSink text={block.text} />
         {clean.trim() && (
           <div
-            className="max-w-[80%] self-start break-words [overflow-wrap:anywhere] rounded-[16px_16px_16px_5px] border border-[#EDE6DA] bg-white px-3.5 py-2 text-[14px] leading-relaxed text-[#2E2A25]"
+            className="max-w-[80%] self-start break-words [overflow-wrap:anywhere] rounded-[16px_16px_16px_5px] border border-[#EDE6DA] bg-white px-3.5 py-2 text-[14px] leading-snug text-[#2E2A25]"
             style={{ boxShadow: "0 1px 2px rgba(60,50,30,0.05)" }}
           >
-            <Markdown className="[&_p]:!my-0 [&_p+p]:!mt-2 [&_ul]:!my-1.5 [&_ol]:!my-1.5 [&_li]:!my-0 [&_pre]:!my-2">
+            <Markdown className="[&_p]:!my-0 [&_p]:!leading-snug [&_p+p]:!mt-2 [&_ul]:!my-1.5 [&_ol]:!my-1.5 [&_li]:!my-0 [&_li]:!leading-snug [&_pre]:!my-2">
               {clean.trim()}
             </Markdown>
           </div>

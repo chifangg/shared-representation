@@ -6,6 +6,7 @@ mod conversations;
 mod core;
 mod diagram;
 mod examples;
+mod logging;
 mod suggestions;
 mod tool_dispatch;
 mod web_server;

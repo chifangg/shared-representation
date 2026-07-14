@@ -62,16 +62,19 @@ export function useCanvasFit({
   fitFnRef.current = () => {
     if (state.kind !== "ready") return;
     if (nodes.length === 0) return;
+    // Gentle pan/zoom (400ms, not 220) so toggling focus mode on/off, where
+    // the panel opening/closing changes the canvas width and triggers this
+    // refit, glides instead of snapping. A snap at this size reads as jarring.
     if (view === "focus" && focused && focused.ids.length > 0) {
       fitView({
         nodes: focused.ids.map((id) => ({ id })),
         padding: 0.3,
-        duration: 220,
+        duration: 400,
         maxZoom: 1.3,
         minZoom: 0.5,
       });
     } else {
-      fitView({ padding: 0.15, duration: 220, maxZoom: 1.6 });
+      fitView({ padding: 0.15, duration: 400, maxZoom: 1.6 });
     }
   };
   useEffect(() => {

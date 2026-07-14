@@ -1,11 +1,18 @@
 //! SQLite-backed conversation persistence.
 //!
-//! Two tables:
+//! Three tables:
 //!
 //! ```sql
 //! conversations(id PK, session_cookie, created_at, last_active_at)
 //! messages(id PK, conversation_id FK, ts, kind, content_json)
+//! interaction_events(id PK, ts, server_ts, cookie, chat_session,
+//!                    project_key, event, source, payload_json)
 //! ```
+//!
+//! `interaction_events` is the user-study telemetry sink: the frontend
+//! batches UI events to `POST /api/log` and analysis reads this table
+//! straight out of the db file, joining transcripts via
+//! `chat_session` = `conversations.id`.
 //!
 //! A *conversation* is a single Claude subprocess lifetime keyed by the
 //! client-generated `session_id` (same UUID we pass through to
@@ -64,6 +71,54 @@ pub struct MessageRow {
     pub ts: i64,
     pub kind: String,
     pub content_json: serde_json::Value,
+}
+
+/// One interaction-log event as sent by the frontend's `interactionLog`
+/// module. `payload` stays opaque JSON so new event kinds never need a
+/// schema migration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InteractionEventIn {
+    pub ts: i64,
+    pub event: String,
+    pub source: String,
+    #[serde(default)]
+    pub chat_session: Option<String>,
+    #[serde(default)]
+    pub project_key: Option<i64>,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+/// One stored interaction-log row, as served to the /logs viewer.
+/// `label` is a researcher-editable tag (the event name itself is never
+/// rewritten, so analysis stays trustworthy).
+#[derive(Debug, Clone, Serialize)]
+pub struct InteractionEventRow {
+    pub id: i64,
+    pub ts: i64,
+    pub server_ts: i64,
+    pub cookie: String,
+    pub chat_session: Option<String>,
+    pub project_key: Option<i64>,
+    pub event: String,
+    pub source: String,
+    pub payload: serde_json::Value,
+    pub label: Option<String>,
+    /// Researcher-assigned participant name, resolved through the
+    /// session_participants mapping (one assignment covers every row of
+    /// that chat session, past and future).
+    pub participant: Option<String>,
+}
+
+/// One session group for the /logs viewer's folder view: every event
+/// rolls up under its chat session, with the participant mapping applied.
+#[derive(Debug, Clone, Serialize)]
+pub struct InteractionSessionRow {
+    pub chat_session: Option<String>,
+    pub participant: Option<String>,
+    pub events: i64,
+    pub first_ts: i64,
+    pub last_ts: i64,
 }
 
 impl ConversationStore {
@@ -198,6 +253,202 @@ impl ConversationStore {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
+
+    /// Batch-insert interaction events for one guest cookie in a single
+    /// transaction (the store shares one connection behind a mutex, so
+    /// per-row inserts would hold the lock N times). Returns the count
+    /// stored.
+    pub async fn insert_interaction_events(
+        &self,
+        cookie: &str,
+        events: &[InteractionEventIn],
+    ) -> Result<usize> {
+        let now = now_secs();
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO interaction_events \
+                 (ts, server_ts, cookie, chat_session, project_key, event, source, payload_json) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for e in events {
+                let body = serde_json::to_string(&e.payload)?;
+                stmt.execute(params![
+                    e.ts,
+                    now,
+                    cookie,
+                    e.chat_session,
+                    e.project_key,
+                    e.event,
+                    e.source,
+                    body
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(events.len())
+    }
+
+    /// Filtered page of interaction events, newest first, for the /logs
+    /// viewer. `event_like` is a substring match; `source` / `session`
+    /// are exact.
+    pub async fn query_interaction_events(
+        &self,
+        event_like: Option<&str>,
+        source: Option<&str>,
+        session: Option<&str>,
+        participant: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<InteractionEventRow>> {
+        let conn = self.conn.lock().await;
+        let mut sql = String::from(
+            "SELECT e.id, e.ts, e.server_ts, e.cookie, e.chat_session, \
+                    e.project_key, e.event, e.source, e.payload_json, \
+                    e.label, sp.participant \
+             FROM interaction_events e \
+             LEFT JOIN session_participants sp \
+                    ON sp.chat_session = e.chat_session \
+             WHERE 1=1",
+        );
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(ev) = event_like {
+            sql.push_str(" AND e.event LIKE ?");
+            args.push(Box::new(format!("%{ev}%")));
+        }
+        if let Some(s) = source {
+            sql.push_str(" AND e.source = ?");
+            args.push(Box::new(s.to_string()));
+        }
+        if let Some(s) = session {
+            sql.push_str(" AND e.chat_session = ?");
+            args.push(Box::new(s.to_string()));
+        }
+        if let Some(p) = participant {
+            sql.push_str(" AND sp.participant = ?");
+            args.push(Box::new(p.to_string()));
+        }
+        sql.push_str(" ORDER BY e.id DESC LIMIT ? OFFSET ?");
+        args.push(Box::new(limit));
+        args.push(Box::new(offset));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(
+                rusqlite::params_from_iter(args.iter().map(|b| &**b)),
+                |r| {
+                    let payload_str: String = r.get(8)?;
+                    let payload = serde_json::from_str::<serde_json::Value>(&payload_str)
+                        .unwrap_or(serde_json::Value::Null);
+                    Ok(InteractionEventRow {
+                        id: r.get(0)?,
+                        ts: r.get(1)?,
+                        server_ts: r.get(2)?,
+                        cookie: r.get(3)?,
+                        chat_session: r.get(4)?,
+                        project_key: r.get(5)?,
+                        event: r.get(6)?,
+                        source: r.get(7)?,
+                        payload,
+                        label: r.get(9)?,
+                        participant: r.get(10)?,
+                    })
+                },
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Delete one interaction event by id. Returns rows removed (0 or 1).
+    pub async fn delete_interaction_event(&self, id: i64) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        Ok(conn.execute(
+            "DELETE FROM interaction_events WHERE id = ?1",
+            params![id],
+        )?)
+    }
+
+    /// Assign a whole chat session to a participant (the /logs viewer's
+    /// grouping). Upserts the mapping; None clears it. Every event row
+    /// of that session, past and future, resolves to this name.
+    pub async fn set_session_participant(
+        &self,
+        session: &str,
+        participant: Option<&str>,
+    ) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        match participant {
+            Some(p) => Ok(conn.execute(
+                "INSERT INTO session_participants(chat_session, participant) \
+                 VALUES(?1, ?2) \
+                 ON CONFLICT(chat_session) \
+                 DO UPDATE SET participant = excluded.participant",
+                params![session, p],
+            )?),
+            None => Ok(conn.execute(
+                "DELETE FROM session_participants WHERE chat_session = ?1",
+                params![session],
+            )?),
+        }
+    }
+
+    /// Session-grouped rollup, most recently active first, for the
+    /// viewer's default folder view.
+    pub async fn list_interaction_sessions(
+        &self,
+    ) -> Result<Vec<InteractionSessionRow>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT e.chat_session, sp.participant, COUNT(*), \
+                    MIN(e.ts), MAX(e.ts) \
+             FROM interaction_events e \
+             LEFT JOIN session_participants sp \
+                    ON sp.chat_session = e.chat_session \
+             GROUP BY e.chat_session, sp.participant \
+             ORDER BY MAX(e.ts) DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(InteractionSessionRow {
+                    chat_session: r.get(0)?,
+                    participant: r.get(1)?,
+                    events: r.get(2)?,
+                    first_ts: r.get(3)?,
+                    last_ts: r.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Permanently delete every event of one session (viewer bulk
+    /// delete), plus its participant mapping. Returns events removed.
+    pub async fn delete_session_events(&self, session: &str) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        let n = conn.execute(
+            "DELETE FROM interaction_events WHERE chat_session = ?1",
+            params![session],
+        )?;
+        let _ = conn.execute(
+            "DELETE FROM session_participants WHERE chat_session = ?1",
+            params![session],
+        );
+        Ok(n)
+    }
+
+    /// Set or clear the researcher label on one interaction event.
+    pub async fn set_interaction_event_label(
+        &self,
+        id: i64,
+        label: Option<&str>,
+    ) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        Ok(conn.execute(
+            "UPDATE interaction_events SET label = ?1 WHERE id = ?2",
+            params![label, id],
+        )?)
+    }
 }
 
 fn ensure_schema(conn: &Connection) -> Result<()> {
@@ -220,8 +471,35 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
              FOREIGN KEY(conversation_id) REFERENCES conversations(id)
          );
          CREATE INDEX IF NOT EXISTS messages_by_conv
-             ON messages(conversation_id, id);",
+             ON messages(conversation_id, id);
+
+         CREATE TABLE IF NOT EXISTS interaction_events (
+             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+             ts           INTEGER NOT NULL,
+             server_ts    INTEGER NOT NULL,
+             cookie       TEXT    NOT NULL,
+             chat_session TEXT,
+             project_key  INTEGER,
+             event        TEXT    NOT NULL,
+             source       TEXT    NOT NULL,
+             payload_json TEXT    NOT NULL,
+             label        TEXT
+         );
+         CREATE INDEX IF NOT EXISTS interaction_by_cookie
+             ON interaction_events(cookie, ts);
+         CREATE INDEX IF NOT EXISTS interaction_by_session
+             ON interaction_events(chat_session, id);
+         CREATE TABLE IF NOT EXISTS session_participants (
+             chat_session TEXT PRIMARY KEY,
+             participant  TEXT NOT NULL
+         );",
     )?;
+    // Additive migration for dbs created before `label` existed: the
+    // ALTER fails with "duplicate column name" once present; ignore it.
+    let _ = conn.execute(
+        "ALTER TABLE interaction_events ADD COLUMN label TEXT",
+        [],
+    );
     Ok(())
 }
 

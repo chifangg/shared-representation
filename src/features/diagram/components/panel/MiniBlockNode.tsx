@@ -13,10 +13,15 @@ import type { MiniNodeData } from "../../types";
  */
 export function MiniBlockNode({ data }: NodeProps<Node<MiniNodeData>>) {
   if (data.isGhost) {
+    // Re-stamp on-canvas blocks in their OWN category colour (dashed, to
+    // read as a ghost) instead of a generic amber. Falls back to a neutral
+    // grey when the block has no category.
+    const accent = data.accent ?? "#B4ADA2";
+    const tint = data.tint ?? "#F5F4F2";
     return (
       <div
-        className="rounded-md border border-dashed border-[#F59E0B]/60 bg-[#FFF8EC] px-2.5 py-1.5 text-[11px] font-semibold text-[#A1610B] shadow-sm"
-        style={{ width: 150 }}
+        className="rounded-md border border-dashed px-2.5 py-1.5 text-[11px] font-semibold shadow-sm"
+        style={{ width: 150, background: tint, borderColor: accent, color: "#3A352E" }}
       >
         <Handle
           type="target"
@@ -24,19 +29,27 @@ export function MiniBlockNode({ data }: NodeProps<Node<MiniNodeData>>) {
           className="!h-1.5 !w-1.5 !border-0 !bg-transparent"
         />
         <div className="truncate">{data.label}</div>
-        <div className="mt-0.5 text-[9px] font-medium uppercase tracking-wider text-[#A1610B]/70">
+        <div
+          className="mt-0.5 text-[9px] font-medium uppercase tracking-wider opacity-70"
+          style={{ color: accent }}
+        >
           on canvas
         </div>
         <Handle
           type="source"
           position={Position.Bottom}
-          className="!h-1.5 !w-1.5 !border-0 !bg-[#F59E0B]"
+          className="!h-1.5 !w-1.5 !border-0"
+          style={{ background: accent }}
         />
       </div>
     );
   }
-  const fileCount = data.files.length;
-  const fnCount = data.functions.length;
+  // "Features" = the block's capabilities when present, else its raw
+  // functions. Files are deliberately not surfaced: a file count carries no
+  // signal for the reader, whereas a capability names what the block DOES.
+  const caps = data.capabilities ?? [];
+  const features = caps.length > 0 ? caps : data.functions;
+  const featureCount = features.length;
   return (
     <div
       className={`block-node-grow group relative rounded-md border bg-white px-2.5 py-1.5 shadow-sm transition-all ${
@@ -67,39 +80,20 @@ export function MiniBlockNode({ data }: NodeProps<Node<MiniNodeData>>) {
           {data.caption}
         </div>
       )}
-      {!data.isSelected && (fileCount > 0 || fnCount > 0) && (
+      {!data.isSelected && featureCount > 0 && (
         <div className="mt-1 text-[9px] uppercase tracking-wide text-[#999999]">
-          {fileCount > 0 && `${fileCount} ${fileCount === 1 ? "file" : "files"}`}
-          {fileCount > 0 && fnCount > 0 && " · "}
-          {fnCount > 0 && `${fnCount} ${fnCount === 1 ? "fn" : "fns"}`}
+          {featureCount} {featureCount === 1 ? "feature" : "features"}
         </div>
       )}
-      {data.isSelected && fileCount > 0 && (
+      {data.isSelected && featureCount > 0 && (
         <div className="mt-2">
           <div className="mb-0.5 text-[8px] font-medium uppercase tracking-wider text-[#999999]">
-            Files
+            Features
           </div>
-          <ul className="space-y-0.5 text-[10px] text-[#444444]">
-            {data.files.map((f) => (
-              <li key={f} className="truncate font-mono" title={f}>
+          <ul className="space-y-0.5 text-[10px] leading-snug text-[#444444]">
+            {features.map((f) => (
+              <li key={f} title={f}>
                 {f}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {data.isSelected && fnCount > 0 && (
-        <div className="mt-1.5">
-          <div className="mb-0.5 text-[8px] font-medium uppercase tracking-wider text-[#999999]">
-            Functions
-          </div>
-          <ul className="flex flex-wrap gap-1 text-[9px] text-[#444444]">
-            {data.functions.map((fn) => (
-              <li
-                key={fn}
-                className="rounded bg-[#F0F0F0] px-1.5 py-0.5 font-mono"
-              >
-                {fn}
               </li>
             ))}
           </ul>

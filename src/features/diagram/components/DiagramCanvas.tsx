@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Plus } from "lucide-react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -61,9 +62,7 @@ import { ConnectionOptionsOverlay } from "./overlays/ConnectionOptionsOverlay";
 import { IntentGate } from "./overlays/IntentGate";
 import { DiagramFetchOverlay } from "./overlays/DiagramFetchOverlay";
 import { EditSummaryToast } from "./overlays/EditSummaryToast";
-import { RegeneratingChip } from "./overlays/RegeneratingChip";
-import { AdaptiveFocusBanner } from "./overlays/AdaptiveFocusBanner";
-import { AddNewBlockButton } from "./overlays/AddNewBlockButton";
+import { DiagramControls } from "./overlays/DiagramControls";
 import { ColorSchemeLegend } from "./overlays/ColorSchemeLegend";
 import { useColorScheme } from "../color/useColorScheme";
 import { resolveBlockColor } from "../color/scheme";
@@ -83,25 +82,35 @@ const EMPTY_BLOCKS: DiagramBlock[] = [];
 
 export function DiagramCanvas({
   view,
+  onViewChange,
   headerSlot,
 }: {
   view: DiagramView;
+  /** Switch the diagram view. The overview/focus toggle now lives on the
+   *  canvas (DiagramControls) rather than the panel header. */
+  onViewChange: (v: DiagramView) => void;
   /** DOM node in the panel header where the intent chip portals itself,
    *  so it lives in the chrome instead of floating over the canvas. */
   headerSlot?: HTMLElement | null;
 }) {
   return (
     <ReactFlowProvider>
-      <DiagramCanvasInner view={view} headerSlot={headerSlot} />
+      <DiagramCanvasInner
+        view={view}
+        onViewChange={onViewChange}
+        headerSlot={headerSlot}
+      />
     </ReactFlowProvider>
   );
 }
 
 function DiagramCanvasInner({
   view,
+  onViewChange,
   headerSlot,
 }: {
   view: DiagramView;
+  onViewChange: (v: DiagramView) => void;
   headerSlot?: HTMLElement | null;
 }) {
   const { files, chatMessages, chatRunning, projectKey } = useProject();
@@ -204,7 +213,7 @@ function DiagramCanvasInner({
 
   // Adaptive focus lifecycle: debounced /api/diagram?view=focus on
   // each new user turn. Resets on projectKey.
-  const { focused, setFocused, regenerating } = useAdaptiveFocus({
+  const { focused, regenerating, emptyRound } = useAdaptiveFocus({
     view,
     state,
     files,
@@ -572,59 +581,67 @@ function DiagramCanvasInner({
   // Auto-fit during streaming + final fit + ResizeObserver-driven refit.
   const canvasContainerRef = useCanvasFit({ state, view, focused, nodes });
 
-  const panelOpen =
-    view === "focus" &&
-    !!focused &&
-    (focused.ids.length > 0 ||
-      focused.blocks.length > 0 ||
-      focused.arrows.length > 0);
+  // The panel is open for the WHOLE of focus mode, not just once there's
+  // content. Switching into adaptive focus animates it in immediately; with
+  // nothing prompted yet it shows a welcome invite, then the loading state
+  // once a round starts, then the detail mini-graph. This keeps the focus-mode
+  // toggle anchored to the panel's corner instead of leaving a bare canvas
+  // with a floating banner.
+  const panelOpen = view === "focus";
 
   return (
     <div className="relative flex h-full w-full bg-[#FAFAFA]">
       <div
         ref={canvasContainerRef}
-        className={`relative h-full ${panelOpen ? "flex-1 min-w-0" : "w-full"} transition-opacity duration-300 ${
-          regenerating || editRegenIds.size > 0 ? "opacity-60" : "opacity-100"
-        }`}
+        className={`relative h-full ${panelOpen ? "flex-1 min-w-0" : "w-full"}`}
       >
-        <ReactFlow
-          nodes={renderedNodes}
-          edges={renderedEdges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={visualEdit.handleAddConnection}
-          onNodeClick={onNodeClick}
-          onPaneClick={onPaneClick}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.15, maxZoom: 1.6 }}
-          proOptions={{ hideAttribution: true }}
-          minZoom={0.3}
-          maxZoom={2}
-          nodesDraggable
-          nodesConnectable={state.kind === "ready"}
-          connectionMode={ConnectionMode.Loose}
-          nodesFocusable={false}
-          elementsSelectable={false}
+        {/* The regen "fog" dims only the diagram CONTENT (nodes, edges,
+         *  labels) so the reader sees it's stale/rebuilding. The overlay
+         *  controls below (focus toggle, legend, add button) sit outside this
+         *  layer and stay crisp: fogging a control you might click reads as a
+         *  glitch, not as feedback. */}
+        <div
+          className={`absolute inset-0 transition-opacity duration-300 ${
+            regenerating || editRegenIds.size > 0 ? "opacity-60" : "opacity-100"
+          }`}
         >
-          <Background color="#E0E0E0" gap={16} />
-          <Controls
-            showInteractive={false}
-            className="!border-[#D4D4D4] !bg-white"
-          />
-        </ReactFlow>
+          <ReactFlow
+            nodes={renderedNodes}
+            edges={renderedEdges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={visualEdit.handleAddConnection}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.15, maxZoom: 1.6 }}
+            proOptions={{ hideAttribution: true }}
+            minZoom={0.3}
+            maxZoom={2}
+            nodesDraggable
+            nodesConnectable={state.kind === "ready"}
+            connectionMode={ConnectionMode.Loose}
+            nodesFocusable={false}
+            elementsSelectable={false}
+          >
+            <Background color="#E0E0E0" gap={16} />
+            <Controls
+              showInteractive={false}
+              className="!border-[#D4D4D4] !bg-white"
+            />
+          </ReactFlow>
+        </div>
         <DiagramFetchOverlay
           state={state}
           hasFiles={files.length > 0}
           nodeCount={nodes.length}
           onRetry={() => setRetryNonce((n) => n + 1)}
         />
-        {regenerating && <RegeneratingChip />}
-        {view === "focus" &&
-          nodes.length > 0 &&
-          chatMessages.length === 0 &&
-          !regenerating && <AdaptiveFocusBanner />}
+        {/* Adaptive-focus welcome / loading / streaming count all live INSIDE
+         *  the side panel (DiagramFocusPanel), which is open for the whole of
+         *  focus mode, so nothing floats over the canvas during a focus round. */}
         {visualEdit.pendingOptions && state.kind === "ready" && (
           <ConnectionOptionsOverlay
             target={visualEdit.pendingOptions.target}
@@ -643,11 +660,6 @@ function DiagramCanvasInner({
             onCancel={visualEdit.handleIntentGateCancel}
           />
         )}
-        {state.kind === "ready" &&
-          !visualEdit.pendingOptions &&
-          !visualEdit.intentGate && (
-            <AddNewBlockButton onClick={visualEdit.handleAddNewBlock} />
-          )}
         {state.kind === "ready" &&
           intentCtl.intent !== null &&
           !intentCtl.editingIntent &&
@@ -696,6 +708,19 @@ function DiagramCanvasInner({
             generating={color.generating}
             genError={color.genError}
             onClearGenError={color.clearGenError}
+            topAccessory={
+              !visualEdit.pendingOptions && !visualEdit.intentGate ? (
+                <button
+                  type="button"
+                  onClick={visualEdit.handleAddNewBlock}
+                  title="Add a new module (or double-click the empty canvas)"
+                  className="flex items-center gap-1.5 rounded-full border border-[#78716C]/20 bg-white/95 py-2 pl-3 pr-3.5 text-[12px] font-medium text-[#484848] shadow-lg backdrop-blur-[2px] transition-colors hover:bg-white"
+                >
+                  <Plus className="h-4 w-4 text-[#78716C]" strokeWidth={2} />
+                  Add block
+                </button>
+              ) : null
+            }
           />
         )}
         {state.kind === "ready" && (
@@ -752,12 +777,25 @@ function DiagramCanvasInner({
       {panelOpen && state.kind === "ready" && (
         <DiagramFocusPanel
           baseBlocks={state.schema.blocks}
-          focused={focused!}
+          focused={focused ?? { ids: [], blocks: [], arrows: [] }}
+          streaming={regenerating}
+          emptyRound={emptyRound}
           promotedIds={new Set(promoted.blocks.map((b) => b.id))}
           width={panelWidth}
           onWidthChange={setPanelWidth}
-          onClose={() => setFocused(null)}
+          // Closing the panel means leaving focus mode (same as the toggle).
+          // `focused` is intentionally kept so returning restores the view.
+          onClose={() => onViewChange("overview")}
           onPromote={(b) => {
+            // NOTE: promoting adds a node + arrow to the merged schema, so
+            // dagre re-lays-out the whole graph and unrelated blocks can
+            // shift slightly (an arrow visibly re-routing). We do NOT pin all
+            // block positions here to stop that: pinning writes into the
+            // manual-drag override, which then freezes the diagram's live
+            // auto-layout for the rest of the session (make-room on select,
+            // re-layout on regen all stop). The proper fix is to lay promoted
+            // blocks out beside their parent OUTSIDE the global dagre pass so
+            // base blocks are never disturbed; that is a separate change.
             setPromoted((prev) => {
               if (prev.blocks.some((x) => x.id === b.id)) return prev;
               const knownIds = new Set([
@@ -777,9 +815,37 @@ function DiagramCanvasInner({
                       p.label === a.label,
                   ),
               );
+              // Inherit the parent overview region's category so the
+              // promoted block gets a real color instead of rendering
+              // white on the canvas. DROP `parent` so that region isn't
+              // turned into a container frame; wire an explicit arrow to
+              // it instead so the block stays connected to where it came
+              // from.
+              const parentBlock = b.parent
+                ? state.schema.blocks.find((x) => x.id === b.parent)
+                : undefined;
+              const promotedBlock: DiagramBlock = {
+                ...b,
+                parent: null,
+                category: b.category ?? parentBlock?.category,
+              };
+              const alreadyLinked =
+                !parentBlock ||
+                newArrows.some(
+                  (a) =>
+                    (a.from === parentBlock.id && a.to === b.id) ||
+                    (a.from === b.id && a.to === parentBlock.id),
+                ) ||
+                prev.arrows.some(
+                  (p) => p.from === parentBlock.id && p.to === b.id,
+                );
+              const parentArrow =
+                parentBlock && !alreadyLinked
+                  ? [{ from: parentBlock.id, to: b.id, label: "detail" }]
+                  : [];
               return {
-                blocks: [...prev.blocks, b],
-                arrows: [...prev.arrows, ...newArrows],
+                blocks: [...prev.blocks, promotedBlock],
+                arrows: [...prev.arrows, ...newArrows, ...parentArrow],
               };
             });
           }}
@@ -793,11 +859,19 @@ function DiagramCanvasInner({
           }}
         />
       )}
+      {/* Focus-mode toggle anchored to the OUTER container's bottom-right, so
+       *  it holds the same screen spot whether the side panel is open or not
+       *  (over the panel's corner when open). Sits outside the canvas div on
+       *  purpose: otherwise the opening panel would shove it left, making the
+       *  user chase it to switch back. */}
+      {state.kind === "ready" && (
+        <DiagramControls view={view} onViewChange={onViewChange} />
+      )}
     </div>
   );
 }
 
 // DiagramFocusPanel, MiniBlockNode, MiniLabeledEdge, FocusMiniGraph,
-// DiagramViewSwitcher, DiagramFetchOverlay, ElapsedClock, DiagramLoadingCard,
+// DiagramFetchOverlay, ElapsedClock, DiagramLoadingCard,
 // ConnectionOptionsOverlay, IntentGate, and OptionCardButton all moved
 // to @/features/diagram/components/. Imported above.

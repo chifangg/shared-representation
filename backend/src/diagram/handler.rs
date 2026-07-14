@@ -160,7 +160,6 @@ pub async fn generate_diagram(Json(req): Json<DiagramRequest>) -> Response {
 
     let body_stream = async_stream::stream! {
         use futures_util::StreamExt;
-        let client = reqwest::Client::new();
 
         // Conversation state. Grows by 2 entries per turn after the first
         // (assistant response + user tool_results).
@@ -187,15 +186,7 @@ pub async fn generate_diagram(Json(req): Json<DiagramRequest>) -> Response {
                 }
             };
 
-            let resp = match client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await
-            {
+            let resp = match crate::core::anthropic::post_messages(&api_key, &body).await {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("📐 ❌ anthropic request failed (turn {turn_idx}): {e}");
@@ -335,9 +326,19 @@ pub async fn generate_diagram(Json(req): Json<DiagramRequest>) -> Response {
 
             total_output_tokens += turn_output_tokens;
             final_stop_reason = turn_stop_reason.clone();
+            // Per-turn tool-name breakdown: diagnoses whether detail_block
+            // events stream in turn 0 or get deferred to a later turn
+            // (the "empty canvas for ~1.5min then a burst" symptom in the
+            // focus view is the model splitting blocks across turns).
+            let mut by_name: std::collections::BTreeMap<&str, usize> =
+                std::collections::BTreeMap::new();
+            for (_id, name, _input) in &turn_tool_uses {
+                *by_name.entry(name.as_str()).or_insert(0) += 1;
+            }
             eprintln!(
-                "📐 · turn {turn_idx}: {} tool_uses, stop_reason={turn_stop_reason}, output_tokens={turn_output_tokens}",
-                turn_tool_uses.len()
+                "📐 · turn {turn_idx}: {} tool_uses {:?}, stop_reason={turn_stop_reason}, output_tokens={turn_output_tokens}",
+                turn_tool_uses.len(),
+                by_name
             );
 
             // Terminate when the model is finished. `done` is the

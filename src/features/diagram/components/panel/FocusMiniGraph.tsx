@@ -13,6 +13,7 @@ import type {
   MiniNodeData,
 } from "../../types";
 import { estimateMiniExpandedHeight } from "../../layout/layoutSchema";
+import { categoryStyle } from "../../util/blockCategory";
 import { miniNodeTypes } from "./MiniBlockNode";
 import { miniEdgeTypes } from "./MiniLabeledEdge";
 
@@ -110,6 +111,7 @@ export function FocusMiniGraph({
     const nodes: Node<MiniNodeData>[] = [
       ...ghostNodes.map<Node<MiniNodeData>>((b) => {
         const pos = g.node(b.id);
+        const style = categoryStyle(b.category);
         return {
           id: `ghost-${b.id}`,
           type: "mini",
@@ -118,7 +120,6 @@ export function FocusMiniGraph({
           data: {
             label: b.label,
             caption: "",
-            files: [],
             functions: [],
             isGhost: true,
             isPromoted: false,
@@ -126,6 +127,10 @@ export function FocusMiniGraph({
             block: null,
             onPromote: null,
             onUnpromote: null,
+            // Re-stamp on-canvas blocks in their own category colour, not
+            // a generic amber, so the ghost reads as "the same block".
+            tint: style?.tint,
+            accent: style?.accent,
           },
         };
       }),
@@ -141,8 +146,8 @@ export function FocusMiniGraph({
           data: {
             label: b.label,
             caption: b.caption,
-            files: b.provenance?.files ?? [],
             functions: b.provenance?.functions ?? [],
+            capabilities: b.capabilities ?? [],
             isGhost: false,
             isPromoted: promotedIds.has(b.id),
             isSelected: isSel,

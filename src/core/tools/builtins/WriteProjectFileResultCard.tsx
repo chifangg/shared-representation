@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { FilePen, FileX, FilePlus } from "lucide-react";
 import type { ToolResultProps } from "@/core/tools/registry";
 import type { DiffLine } from "./WriteProjectFile";
+import { logEvent } from "@/core/interactionLog";
 
 type Result =
   | {
@@ -23,13 +25,21 @@ type Result =
 export function WriteProjectFileResultCard({
   content,
 }: ToolResultProps<Result>) {
-  if (!content || typeof content !== "object") {
-    return (
-      <div className="rounded-md border border-[#E0E0E0] bg-[#FAFAFA] px-3 py-1.5 text-xs text-[#666666]">
-        Tool returned no parseable result.
-      </div>
-    );
-  }
+  const unparseable = !content || typeof content !== "object";
+  // Non-JSON results are transient bridge/CLI hiccups (persisted-output
+  // rewrite, stale session after a backend restart) that Claude recovers
+  // from by retrying; rendering them only alarms participants. Log
+  // silently for diagnosis and show nothing.
+  useEffect(() => {
+    if (unparseable) {
+      logEvent(
+        "tool-result-unparseable",
+        { card: "write_project_file" },
+        "system",
+      );
+    }
+  }, [unparseable]);
+  if (unparseable) return null;
 
   if (!content.ok) {
     // A failed edit (e.g. old_string did not match) is something the model

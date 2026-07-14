@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Interaction log</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F7F5F1; color: #2A2622; font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  header { position: sticky; top: 0; background: #FCFBF9; border-bottom: 1px solid #E7E2DA; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; z-index: 2; }
+  header h1 { font-size: 14px; margin: 0 12px 0 0; }
+  input, select, button { font: inherit; padding: 4px 8px; border: 1px solid #D8CFC2; border-radius: 6px; background: #fff; color: inherit; }
+  input:focus, select:focus { outline: none; border-color: #B0975A; }
+  button { cursor: pointer; }
+  button:hover { background: #F5F1EA; }
+  .toggle { border-radius: 6px 0 0 6px; }
+  .toggle + .toggle { border-radius: 0 6px 6px 0; border-left: none; }
+  .toggle.on { background: #EDE4D2; color: #6B5433; font-weight: 600; }
+  #summary { color: #8A8276; margin-left: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #EEE9E1; vertical-align: top; }
+  th { position: sticky; top: 49px; background: #F7F5F1; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #8A8276; z-index: 1; }
+  tr:hover td { background: #FCFBF9; }
+  .src { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .src.user { background: #E7EDDC; color: #55613B; }
+  .src.agent { background: #EDE4D2; color: #8A6D3B; }
+  .src.system { background: #E4E2DE; color: #6B6256; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .muted { color: #A8A29E; }
+  .payload { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .payload.open { white-space: pre-wrap; overflow: visible; }
+  .lbl { color: #7C5C2E; background: #F3EAD7; border-radius: 5px; padding: 0 6px; cursor: pointer; }
+  .lbl.empty { color: #C4BBAD; background: transparent; }
+  .part { color: #3F5A52; background: #DCEAE4; border-radius: 5px; padding: 0 6px; cursor: pointer; font-weight: 600; }
+  .part.empty { color: #C4BBAD; background: transparent; font-weight: 400; }
+  .rowbtn { border: none; background: transparent; color: #A8A29E; padding: 2px 4px; }
+  .rowbtn:hover { color: #9C5638; background: transparent; }
+  .sess-row { cursor: pointer; }
+  .count { font-weight: 600; }
+  #sess-context { padding: 8px 16px; border-bottom: 1px solid #EEE9E1; background: #FCFBF9; display: flex; align-items: center; gap: 10px; }
+  #sess-context[hidden] { display: none; }
+  #empty, #s-empty { padding: 40px; text-align: center; color: #A8A29E; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Interaction log</h1>
+  <button id="btn-sessions" class="toggle on">Sessions</button><button id="btn-events" class="toggle">Events</button>
+  <span id="filters" style="display: none;">
+    <input id="f-event" placeholder="event contains..." size="14" />
+    <select id="f-source">
+      <option value="">all sources</option>
+      <option value="user">user</option>
+      <option value="agent">agent</option>
+      <option value="system">system</option>
+    </select>
+    <input id="f-session" placeholder="session id..." size="12" />
+    <input id="f-participant" placeholder="participant..." size="10" />
+    <select id="f-limit">
+      <option>100</option>
+      <option selected>200</option>
+      <option>500</option>
+      <option>1000</option>
+    </select>
+  </span>
+  <button id="refresh">Refresh</button>
+  <label><input type="checkbox" id="auto" /> auto 5s</label>
+  <span id="summary"></span>
+</header>
+
+<section id="sessions-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>participant</th><th>session</th><th>events</th>
+        <th>first</th><th>last</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="sess-rows"></tbody>
+  </table>
+  <div id="s-empty" hidden>No sessions yet.</div>
+</section>
+
+<section id="events-wrap" hidden>
+  <div id="sess-context" hidden></div>
+  <table>
+    <thead>
+      <tr>
+        <th>id</th><th>time</th><th>event</th><th>source</th>
+        <th>session</th>
+        <th>proj</th><th>label</th><th>payload</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="empty" hidden>No events match.</div>
+</section>
+
+<script>
+const token = new URLSearchParams(location.search).get("token") || "";
+const qs = (o) => Object.entries(o).filter(([,v]) => v !== "" && v != null)
+  .map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+const el = (id) => document.getElementById(id);
+
+let view = "sessions";
+function setView(v) {
+  view = v;
+  el("sessions-wrap").hidden = v !== "sessions";
+  el("events-wrap").hidden = v !== "events";
+  el("filters").style.display = v === "events" ? "contents" : "none";
+  el("btn-sessions").classList.toggle("on", v === "sessions");
+  el("btn-events").classList.toggle("on", v === "events");
+  reload();
+}
+function reload() { if (view === "sessions") loadSessions(); else load(); }
+
+function fmt(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString("en-CA").slice(5) + " " +
+    d.toLocaleTimeString("en-GB", { hour12: false });
+}
+
+async function assignParticipant(sessionId, current) {
+  const next = prompt(
+    `Participant for session ${sessionId.slice(0, 8)}... (empty clears):`,
+    current || "",
+  );
+  if (next === null) return false;
+  await fetch(
+    `/api/log/session/${encodeURIComponent(sessionId)}/participant?${qs({ token })}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participant: next }),
+    },
+  );
+  return true;
+}
+
+function openSession(sid) {
+  navigate("events", sid || "");
+}
+
+function updateSessionContext(sidFilter, rows) {
+  const strip = el("sess-context");
+  if (!sidFilter) { strip.hidden = true; strip.innerHTML = ""; return; }
+  const fullSid = (rows[0] && rows[0].chat_session) || sidFilter;
+  const participant = rows[0] ? rows[0].participant : null;
+  strip.innerHTML = "";
+  const sidSpan = document.createElement("span");
+  sidSpan.className = "mono muted";
+  sidSpan.textContent = "session " + fullSid.slice(0, 8);
+  const pb = document.createElement("span");
+  pb.className = "part" + (participant ? "" : " empty");
+  pb.textContent = participant || "+ assign";
+  pb.title = "Assign this whole session to a participant (empty clears)";
+  pb.onclick = async () => {
+    if (await assignParticipant(fullSid, participant)) load();
+  };
+  strip.appendChild(sidSpan);
+  strip.appendChild(pb);
+  strip.hidden = false;
+}
+
+async function loadSessions() {
+  const res = await fetch(`/api/log/sessions?${qs({ token })}`);
+  const body = await res.json();
+  if (!body.success) { el("summary").textContent = body.error || "error"; return; }
+  const rows = body.data;
+  const tbody = el("sess-rows");
+  tbody.innerHTML = "";
+  el("s-empty").hidden = rows.length > 0;
+  let total = 0;
+  const named = new Set();
+  for (const s of rows) {
+    total += s.events;
+    if (s.participant) named.add(s.participant);
+    const sid = s.chat_session;
+    const tr = document.createElement("tr");
+    tr.className = "sess-row";
+
+    const pTd = document.createElement("td");
+    const pb = document.createElement("span");
+    pb.className = "part" + (s.participant ? "" : " empty");
+    pb.textContent = s.participant || "+ assign";
+    pb.title = "Assign this session to a participant (empty clears)";
+    pb.onclick = async (e) => {
+      e.stopPropagation();
+      if (!sid) { alert("These rows have no session id."); return; }
+      if (await assignParticipant(sid, s.participant)) loadSessions();
+    };
+    pTd.appendChild(pb);
+    tr.appendChild(pTd);
+
+    tr.appendChild(td(sid ? sid.slice(0, 8) : "(no session)", "mono muted"));
+    tr.appendChild(td(String(s.events), "count"));
+    tr.appendChild(td(fmt(s.first_ts), "mono"));
+    tr.appendChild(td(fmt(s.last_ts), "mono"));
+
+    const delTd = document.createElement("td");
+    const del = document.createElement("button");
+    del.className = "rowbtn";
+    del.textContent = "✕";
+    del.title = "Permanently delete every event of this session";
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!sid) return;
+      const key = sid.slice(0, 8);
+      const typed = prompt(
+        `This PERMANENTLY deletes all ${s.events} events of session ${key}... and cannot be undone.\nType ${key} to confirm:`,
+      );
+      if (typed === null) return;
+      if (typed.trim() !== key) { alert("Not deleted: text did not match."); return; }
+      await fetch(`/api/log/session/${encodeURIComponent(sid)}?${qs({ token })}`, {
+        method: "DELETE",
+      });
+      loadSessions();
+    };
+    delTd.appendChild(del);
+    tr.appendChild(delTd);
+
+    tr.onclick = () => openSession(sid);
+    tbody.appendChild(tr);
+  }
+  el("summary").textContent =
+    `${rows.length} sessions · ${total} events` +
+    (named.size ? ` · ${named.size} participant${named.size > 1 ? "s" : ""}` : "");
+}
+
+async function load() {
+  const params = {
+    event: el("f-event").value.trim(),
+    source: el("f-source").value,
+    session: el("f-session").value.trim(),
+    participant: el("f-participant").value.trim(),
+    limit: el("f-limit").value,
+    token,
+  };
+  const res = await fetch(`/api/log/query?${qs(params)}`);
+  const body = await res.json();
+  if (!body.success) { el("summary").textContent = body.error || "error"; return; }
+  updateSessionContext(params.session, body.data);
+  render(body.data);
+}
+
+function render(rows) {
+  const tbody = el("rows");
+  tbody.innerHTML = "";
+  el("empty").hidden = rows.length > 0;
+  const counts = { user: 0, agent: 0, system: 0 };
+  for (const r of rows) {
+    counts[r.source] = (counts[r.source] || 0) + 1;
+    const tr = document.createElement("tr");
+
+    const sess = r.chat_session ? r.chat_session.slice(0, 8) : "";
+
+    tr.appendChild(td(String(r.id), "mono muted"));
+    tr.appendChild(td(fmt(r.ts), "mono"));
+    tr.appendChild(td(r.event, "mono"));
+    // The source value arrives from an unauthenticated ingest endpoint,
+    // so it must never touch innerHTML (stored XSS). textContent for the
+    // value; the styling class only when it is one of the known sources.
+    const srcTd = document.createElement("td");
+    const srcSpan = document.createElement("span");
+    srcSpan.className =
+      "src" + (["user", "agent", "system"].includes(r.source) ? " " + r.source : "");
+    srcSpan.textContent = r.source;
+    srcTd.appendChild(srcSpan);
+    tr.appendChild(srcTd);
+
+    tr.appendChild(td(sess, "mono muted"));
+    tr.appendChild(td(r.project_key == null ? "" : String(r.project_key), "muted"));
+
+    const lblTd = document.createElement("td");
+    const lbl = document.createElement("span");
+    lbl.className = "lbl" + (r.label ? "" : " empty");
+    lbl.textContent = r.label || "+ label";
+    lbl.title = "Click to set or clear the label";
+    lbl.onclick = async () => {
+      const next = prompt("Label for row " + r.id + " (empty clears):", r.label || "");
+      if (next === null) return;
+      await fetch(`/api/log/${r.id}/label?${qs({ token })}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: next }),
+      });
+      load();
+    };
+    lblTd.appendChild(lbl);
+    tr.appendChild(lblTd);
+
+    const payTd = td(JSON.stringify(r.payload), "payload mono");
+    payTd.onclick = () => payTd.classList.toggle("open");
+    tr.appendChild(payTd);
+
+    const delTd = document.createElement("td");
+    const del = document.createElement("button");
+    del.className = "rowbtn";
+    del.textContent = "✕";
+    del.title = "Permanently delete this row";
+    del.onclick = async () => {
+      if (!confirm(`Permanently delete row ${r.id} (${r.event})? This cannot be undone.`)) return;
+      await fetch(`/api/log/${r.id}?${qs({ token })}`, { method: "DELETE" });
+      load();
+    };
+    delTd.appendChild(del);
+    tr.appendChild(delTd);
+
+    tbody.appendChild(tr);
+  }
+  const parts = new Set(rows.filter((r) => r.participant).map((r) => r.participant));
+  el("summary").textContent =
+    `${rows.length} rows shown. user ${counts.user || 0} / agent ${counts.agent || 0} / system ${counts.system || 0}` +
+    (parts.size ? ` · ${parts.size} participant${parts.size > 1 ? "s" : ""}` : "");
+}
+
+function td(text, cls) {
+  const c = document.createElement("td");
+  if (cls) c.className = cls;
+  c.textContent = text;
+  return c;
+}
+
+function navigate(v, sid) {
+  if (v === "events") {
+    if (sid !== undefined) el("f-session").value = sid || "";
+    const cur = el("f-session").value.trim();
+    history.pushState(
+      { view: v },
+      "",
+      cur ? `#events=${encodeURIComponent(cur)}` : "#events",
+    );
+  } else {
+    history.pushState({ view: v }, "", location.pathname + location.search);
+  }
+  setView(v);
+}
+function initFromLocation() {
+  const m = location.hash.match(/^#events(?:=(.*))?$/);
+  if (m) {
+    if (m[1]) el("f-session").value = decodeURIComponent(m[1]);
+    setView("events");
+  } else {
+    setView("sessions");
+  }
+}
+window.addEventListener("popstate", initFromLocation);
+el("btn-sessions").onclick = () => navigate("sessions");
+el("btn-events").onclick = () => navigate("events");
+el("refresh").onclick = reload;
+for (const id of ["f-event", "f-source", "f-session", "f-participant", "f-limit"]) {
+  el(id).addEventListener("change", load);
+}
+for (const id of ["f-event", "f-session", "f-participant"]) {
+  el(id).addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+}
+let timer = null;
+el("auto").onchange = (e) => {
+  if (e.target.checked) timer = setInterval(reload, 5000);
+  else clearInterval(timer);
+};
+initFromLocation();
+</script>
+</body>
+</html>

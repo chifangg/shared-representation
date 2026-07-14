@@ -50,10 +50,12 @@ export function estimateMiniExpandedHeight(b: DiagramBlock): number {
   let h = 44;
   const captionLines = Math.max(1, Math.ceil((b.caption?.length ?? 0) / 28));
   h += captionLines * 12;
-  const fileCount = b.provenance?.files?.length ?? 0;
-  if (fileCount > 0) h += 18 + fileCount * 14;
-  const fnCount = b.provenance?.functions?.length ?? 0;
-  if (fnCount > 0) h += 18 + Math.ceil(fnCount / 3) * 18;
+  // Expanded card lists FEATURES (capabilities, else functions), one per
+  // line, plus a small header. Files are no longer surfaced.
+  const caps = b.capabilities ?? [];
+  const featureCount =
+    caps.length > 0 ? caps.length : b.provenance?.functions?.length ?? 0;
+  if (featureCount > 0) h += 18 + featureCount * 14;
   return Math.max(h + 12, 56);
 }
 

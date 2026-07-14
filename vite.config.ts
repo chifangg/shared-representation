@@ -21,6 +21,8 @@ export default defineConfig({
     proxy: {
       "/api": "http://127.0.0.1:8080",
       "/ws": { target: "ws://127.0.0.1:8080", ws: true },
+      // Researcher-facing interaction-log viewer, served by the backend.
+      "/logs": "http://127.0.0.1:8080",
     },
   },
   build: {

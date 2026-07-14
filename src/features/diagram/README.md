@@ -19,7 +19,6 @@ What this module exports (everything else is internal):
 | Export                       | Used by                  | Role                                              |
 | ---------------------------- | ------------------------ | ------------------------------------------------- |
 | `DiagramCanvas`              | AppShell                 | the canvas component                              |
-| `DiagramViewSwitcher`        | AppShell                 | overview/focus dropdown                            |
 | `DiagramBusProvider`         | App.tsx                  | mounts the typed pub/sub bus                       |
 | `useDiagramBusSubscribe`     | ChatView                 | subscribes ChatView to `visual-edit` from diagram  |
 | `parseTargetMetadata`        | ChatView                 | recovers an EditTarget from a user-bubble prompt  |
@@ -75,7 +74,6 @@ features/diagram/
   components/
     DiagramCanvas.tsx             ReactFlowProvider wrapper + DiagramCanvasInner
                                   (the orchestrator)
-    DiagramViewSwitcher.tsx       overview/focus dropdown
     nodes/
       BlockNode.tsx + nodeTypes   block card with inline rename + handles
       LabeledEdge.tsx + edgeTypes smooth-stepped arrow with label pill
@@ -87,11 +85,16 @@ features/diagram/
       OptionCardButton.tsx        one card
       IntentGate.tsx              describe-vs-ask modal
       EditSummaryToast.tsx        "Just edited" floating card
-      RegeneratingChip.tsx        "Refocusing on the conversation…" pill
-      AdaptiveFocusBanner.tsx     "diagram will refocus when you chat" banner
-      AddNewBlockButton.tsx       floating "+" FAB
+      DiagramControls.tsx         focus-mode toggle, anchored to the diagram
+                                  region's bottom-right (over the panel's
+                                  corner when open). The "Add block" button
+                                  lives above the legend, passed as
+                                  ColorSchemeLegend's topAccessory.
     panel/
-      DiagramFocusPanel.tsx       side panel shell + drag handle
+      DiagramFocusPanel.tsx       side panel: open for all of focus mode.
+                                  Welcome invite when nothing's prompted yet,
+                                  then loading + "generating N" count, then the
+                                  detail mini-graph. Resizable drag handle.
       FocusMiniGraph.tsx          nested ReactFlow inside the side panel
       MiniBlockNode.tsx + miniNodeTypes
       MiniLabeledEdge.tsx + miniEdgeTypes

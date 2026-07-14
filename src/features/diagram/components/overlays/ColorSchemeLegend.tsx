@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -35,6 +35,7 @@ export function ColorSchemeLegend({
   generating,
   genError,
   onClearGenError,
+  topAccessory,
 }: {
   schemes: ColorScheme[];
   active: ColorScheme;
@@ -46,6 +47,10 @@ export function ColorSchemeLegend({
   generating: boolean;
   genError: string | null;
   onClearGenError: () => void;
+  /** Rendered as a stacked control directly ABOVE the legend card (e.g. the
+   *  "Add block" button), sharing this bottom-left corner. Hidden while the
+   *  encoding picker is open so the picker popover has room. */
+  topAccessory?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -80,24 +85,32 @@ export function ColorSchemeLegend({
   return (
     <>
       {/* Scrim: dims + blurs the canvas behind the legend, same focus cue
-       *  as a clicked block. Click anywhere to dismiss. */}
+       *  as a clicked block. Click anywhere to dismiss. z-[45] so it also
+       *  covers the focus-mode toggle (z-40, anchored to the outer container),
+       *  which would otherwise stay clickable over the scrim; still below the
+       *  legend stack (z-50) so the picker itself stays interactive. */}
       {picking && (
         <div
-          className="absolute inset-0 z-40 bg-black/10 backdrop-blur-[2px]"
+          className="absolute inset-0 z-[45] bg-black/10 backdrop-blur-[2px]"
           onClick={() => setPicking(false)}
         />
       )}
 
-      <div
-        className={`absolute bottom-4 left-4 z-50 rounded-lg border bg-[#FCFBF9]/95 px-3 py-2.5 backdrop-blur-sm transition-all duration-200 ${
-          showDefs ? "w-60" : ""
-        } ${
-          picking
-            ? "scale-[1.04] border-[#D2CABB] shadow-lg"
-            : "border-[#E7E2DA] shadow-sm"
-        }`}
-        style={{ transformOrigin: "bottom left" }}
-      >
+      {/* Bottom-left stack: the optional accessory (Add block) sits above the
+       *  legend card. The scrim above is a SEPARATE sibling so it keeps
+       *  covering the whole canvas, not just this corner. */}
+      <div className="absolute bottom-4 left-4 z-50 flex flex-col items-start gap-2.5">
+        {!picking && topAccessory}
+        <div
+          className={`relative rounded-lg border bg-[#FCFBF9]/95 px-3 py-2.5 backdrop-blur-sm transition-all duration-200 ${
+            showDefs ? "w-60" : ""
+          } ${
+            picking
+              ? "scale-[1.04] border-[#D2CABB] shadow-lg"
+              : "border-[#E7E2DA] shadow-sm"
+          }`}
+          style={{ transformOrigin: "bottom left" }}
+        >
         {/* Edit affordance: round palette button on the top-right corner. */}
         <button
           type="button"
@@ -251,6 +264,7 @@ export function ColorSchemeLegend({
               </div>
             </div>
           ))}
+        </div>
         </div>
       </div>
     </>
