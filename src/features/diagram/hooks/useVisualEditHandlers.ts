@@ -1,6 +1,7 @@
 import {
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -13,6 +14,7 @@ import {
   type ConnectionOption,
   type DiagramArrow,
   type DiagramBlock,
+  type DiagramSchema,
   type EditTarget,
   type FetchState,
 } from "../types";
@@ -44,11 +46,16 @@ import { dlog, dwarn } from "../util/debug";
  * `useChatSettleEffect`, which consumes the chosen options when the
  * round-2 turn settles.
  */
+/** Stable empty schema so the fallback view keeps one identity while the
+ *  diagram is not ready. */
+const EMPTY_SCHEMA: DiagramSchema = { blocks: [], arrows: [] };
+
 export function useVisualEditHandlers({
   state,
   setState,
   files,
   bus,
+  viewSchema: viewSchemaProp,
   dismissRecentEdit,
   setSelectedId,
   onArrowsLinked,
@@ -57,6 +64,12 @@ export function useVisualEditHandlers({
   setState: Dispatch<SetStateAction<FetchState>>;
   files: FileEntry[];
   bus: DiagramBus;
+  /** The merged "schema as the user sees it" (base plus promoted),
+   *  computed ONCE in DiagramCanvas. Read-only here: guards, label
+   *  resolution, and prompt composition read it so interactions on
+   *  promoted blocks resolve; schema WRITES still target state.schema
+   *  only (promoted blocks live in their own store). */
+  viewSchema?: DiagramSchema;
   /** Clears the "just edited" highlight + toast. Called from every
    *  user-action handler so the highlight survives until they act. */
   dismissRecentEdit: () => void;
@@ -91,6 +104,13 @@ export function useVisualEditHandlers({
      *  a regeneration (which wipes the placeholder) also closes the gate. */
     pendingBlockId?: string;
   } | null>(null);
+
+  // Fall back to the base schema when the caller passes no merged view
+  // (tests, or a caller with nothing promoted).
+  const viewSchema = useMemo<DiagramSchema>(() => {
+    if (viewSchemaProp) return viewSchemaProp;
+    return state.kind === "ready" ? state.schema : EMPTY_SCHEMA;
+  }, [viewSchemaProp, state]);
 
   // Close a stale add-module gate once its placeholder is gone. A regeneration
   // replaces the whole schema and wipes the pending placeholder; without this
@@ -189,11 +209,11 @@ export function useVisualEditHandlers({
     (target: EditTarget) => {
       if (state.kind !== "ready") return;
       bus.emit("visual-edit", {
-        prompt: composeSuggestionsRound1Prompt(target, state.schema),
+        prompt: composeSuggestionsRound1Prompt(target, viewSchema),
         kind: "suggestions-round1",
       });
     },
-    [state, bus],
+    [state, viewSchema, bus],
   );
 
   /**
@@ -260,7 +280,7 @@ export function useVisualEditHandlers({
       bus.emit("visual-edit", {
         prompt: composeExecuteDirectPrompt(
           target,
-          state.schema,
+          viewSchema,
           files,
           trimmed,
           synthOption.title,
@@ -268,7 +288,7 @@ export function useVisualEditHandlers({
         kind: "execute-direct",
       });
     },
-    [state, files, bus, markArrowHandedOff],
+    [state, viewSchema, files, bus, markArrowHandedOff],
   );
 
   /**
@@ -290,10 +310,15 @@ export function useVisualEditHandlers({
       // capability refresh after a block edit) so the gate could silently
       // never open and the pending arrow would blink forever.
       if (state.kind !== "ready") return;
-      const { blocks, arrows } = state.schema;
+      // Existence + duplicate checks run against the MERGED view so arrows
+      // can be drawn to and from promoted blocks too.
+      const { blocks, arrows } = viewSchema;
       if (!blocks.some((b) => b.id === source)) return;
       if (!blocks.some((b) => b.id === target)) return;
       if (arrows.some((a) => a.from === source && a.to === target)) return;
+      // viewSchema MUST be in this callback's deps: promoting a block
+      // changes only the merged view (not `state`), and a stale closure
+      // here silently rejected arrows drawn from freshly promoted blocks.
       dismissRecentEdit();
       setState((prev) => {
         if (prev.kind !== "ready") return prev;
@@ -326,7 +351,7 @@ export function useVisualEditHandlers({
       // Validity was decided above, so open the gate unconditionally.
       setIntentGate({ target: { kind: "arrow", from: source, to: target } });
     },
-    [state, dismissRecentEdit, setState],
+    [state, viewSchema, dismissRecentEdit, setState],
   );
 
   /**
@@ -415,7 +440,9 @@ export function useVisualEditHandlers({
       detailArrows: detail.arrows,
     });
     if (state.kind !== "ready") return;
-    const blocks = state.schema.blocks;
+    // Resolve against the merged view: Claude may reference a promoted
+    // block by label, and those live outside state.schema.
+    const blocks = viewSchema.blocks;
     const resolveId = (label: string): string | null => {
       const lc = label.trim().toLowerCase();
       const exact = blocks.find((b) => b.label.toLowerCase() === lc);
@@ -449,7 +476,7 @@ export function useVisualEditHandlers({
       // "writes / writes" double line. One arrow per pair is enough.
       const samePair = (x: { from: string; to: string }) =>
         (x.from === from && x.to === to) || (x.from === to && x.to === from);
-      if (state.schema.arrows.some(samePair)) continue;
+      if (viewSchema.arrows.some(samePair)) continue;
       if (toAdd.some(samePair)) continue;
       const label = a.label?.trim() || "uses";
       toAdd.push({ from, to, label, pending: "claude" });
@@ -502,7 +529,7 @@ export function useVisualEditHandlers({
       bus.emit("visual-edit", {
         prompt: composeExecuteOptionPrompt(
           target,
-          state.schema,
+          viewSchema,
           files,
           option,
         ),
@@ -510,7 +537,7 @@ export function useVisualEditHandlers({
       });
       setPendingOptions(null);
     },
-    [pendingOptions, state, files, bus, markArrowHandedOff],
+    [pendingOptions, state, viewSchema, files, bus, markArrowHandedOff],
   );
 
   /** Strip any pending arrow / placeholder block tied to the target
@@ -596,12 +623,13 @@ export function useVisualEditHandlers({
   const handleBlockAction = useCallback(
     (blockId: string) => {
       if (state.kind !== "ready") return;
-      if (!state.schema.blocks.some((b) => b.id === blockId)) return;
+      // Merged view: the "..." affordance works on promoted blocks too.
+      if (!viewSchema.blocks.some((b) => b.id === blockId)) return;
       dismissRecentEdit();
       setSelectedId(blockId);
       setIntentGate({ target: { kind: "block", id: blockId } });
     },
-    [state, dismissRecentEdit, setSelectedId],
+    [state, viewSchema, dismissRecentEdit, setSelectedId],
   );
 
   return {

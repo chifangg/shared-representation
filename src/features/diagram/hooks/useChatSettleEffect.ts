@@ -9,6 +9,7 @@ import type { ClaudeMessage } from "@/core/hooks/useClaudeSession";
 import type {
   ConnectionOption,
   DiagramArrow,
+  DiagramBlock,
   EditTarget,
   FetchState,
 } from "../types";
@@ -72,6 +73,7 @@ export function useChatSettleEffect({
   chatMessages,
   state,
   setState,
+  viewBlocks,
   chosenOptionsRef,
   preRegenSnapshotRef,
   preserveRegenRef,
@@ -85,6 +87,12 @@ export function useChatSettleEffect({
   chatMessages: ClaudeMessage[];
   state: FetchState;
   setState: Dispatch<SetStateAction<FetchState>>;
+  /** Merged base+promoted block list for LABEL RESOLUTION only (chat
+   *  chips, dropped-connection notes): a card edit can target a promoted
+   *  block, whose id resolves to nothing in state.schema. Schema writes
+   *  and the capability-refresh queue stay base-only (the refresh path
+   *  is not wired to the promoted store). */
+  viewBlocks?: DiagramBlock[];
   chosenOptionsRef: MutableRefObject<Map<string, ChosenOption>>;
   preRegenSnapshotRef: MutableRefObject<PreRegenSnapshot | null>;
   /** Flipped on here so the structure fetch keeps the old diagram up and
@@ -383,8 +391,9 @@ export function useChatSettleEffect({
       // understands the edit ran but the link wasn't kept.
       let droppedNote: string | undefined;
       if (droppedUserArrows.length > 0 && state.kind === "ready") {
+        const labelBlocks = viewBlocks ?? state.schema.blocks;
         const labelOf = (id: string) =>
-          state.schema.blocks.find((b) => b.id === id)?.label ?? id;
+          labelBlocks.find((b) => b.id === id)?.label ?? id;
         const { from, to } = droppedUserArrows[0];
         const more =
           droppedUserArrows.length > 1
@@ -428,15 +437,11 @@ export function useChatSettleEffect({
             changedBlockIds.add(entry.target.id);
           }
         }
-        const changedBlockLabels =
-          state.kind === "ready"
-            ? Array.from(changedBlockIds)
-                .map(
-                  (id) =>
-                    state.schema.blocks.find((b) => b.id === id)?.label,
-                )
-                .filter((l): l is string => !!l)
-            : [];
+        const chipBlocks =
+          viewBlocks ?? (state.kind === "ready" ? state.schema.blocks : []);
+        const changedBlockLabels = Array.from(changedBlockIds)
+          .map((id) => chipBlocks.find((b) => b.id === id)?.label)
+          .filter((l): l is string => !!l);
         setEditSummary({
           files: Array.from(editedFiles),
           // Roomier cap than the old 220: the closing summary is the part

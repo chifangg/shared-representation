@@ -213,6 +213,38 @@ export function resolveBlockColor(
   return group ? { tint: group.tint, accent: group.accent } : null;
 }
 
+/**
+ * resolveBlockColor plus NEIGHBOR INHERITANCE for blocks the scheme does
+ * not know. Custom schemes freeze their per-block assignments at
+ * generation time, so a block created or promoted afterwards resolves to
+ * null and kept the old encoding's neutral look, sticking out of whatever
+ * encoding the user had switched to. Such a block inherits the color of
+ * its first scheme-known arrow neighbor instead (a promoted block reaches
+ * its origin through the "detail" arrow). The category scheme is exempt:
+ * there color IS the block's own category, and guessing it from a
+ * neighbor would lie. Pure, so every call site (canvas nodes, lens
+ * header) shares one behavior and it stays unit-testable.
+ */
+export function resolveBlockColorWithFallback(
+  scheme: ColorScheme,
+  block: SchemeBlock,
+  arrows: ReadonlyArray<{ from: string; to: string }>,
+  neighborById: (id: string) => SchemeBlock | undefined,
+): { tint: string; accent: string } | null {
+  const own = resolveBlockColor(scheme, block);
+  if (own || scheme.id === "category") return own;
+  for (const a of arrows) {
+    const otherId =
+      a.from === block.id ? a.to : a.to === block.id ? a.from : null;
+    if (!otherId) continue;
+    const other = neighborById(otherId);
+    if (!other) continue;
+    const inherited = resolveBlockColor(scheme, other);
+    if (inherited) return inherited;
+  }
+  return null;
+}
+
 /** The scheme's groups that actually contain at least one block, in
  *  scheme order, so the legend lists only what is on screen. */
 export function presentGroups(

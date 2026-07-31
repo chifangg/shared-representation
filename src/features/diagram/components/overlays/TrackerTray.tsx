@@ -6,7 +6,7 @@ import {
   type CSSProperties,
   type RefObject,
 } from "react";
-import { X } from "lucide-react";
+import { History, X } from "lucide-react";
 import type { TrackerEntry } from "../../hooks/useInteractionTracker";
 import { TrackerGlyph } from "./TrackerGlyph";
 
@@ -176,6 +176,12 @@ export function TrackerTray({
   // start made the re-invoke skip straight to the end, so the opening
   // pause never showed at all.
   const rideDoneRef = useRef(false);
+  // When the current ride began, so a re-run can tell StrictMode's dev
+  // double-invoke (teardown and re-run within the same commit, ride
+  // barely started: replay the full ride) apart from an entry APPENDED
+  // mid-ride (tray open during a streaming turn: glide to the new end
+  // instead of yanking the strip back to zero and holding again).
+  const rideStartedAtRef = useRef(0);
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
@@ -189,11 +195,20 @@ export function TrackerTray({
       else el.scrollTo({ left: target, behavior: "smooth" });
       return;
     }
+    const sinceStart = performance.now() - rideStartedAtRef.current;
+    if (rideStartedAtRef.current > 0 && sinceStart > 150) {
+      rideDoneRef.current = true;
+      el.style.scrollSnapType = "";
+      if (reduced) el.scrollLeft = target;
+      else el.scrollTo({ left: target, behavior: "smooth" });
+      return;
+    }
     if (reduced) {
       el.scrollLeft = target;
       rideDoneRef.current = true;
       return;
     }
+    rideStartedAtRef.current = performance.now();
     // Scroll snap fights the per-frame scrollLeft writes (each write gets
     // coerced toward the nearest snap stop, which reads as stutter), so it
     // is switched off for the ride and restored once the strip lands.
@@ -247,15 +262,10 @@ export function TrackerTray({
           visibility: pos ? "visible" : "hidden",
         }}
       >
-        {/* With entries present the header is just the close control: the
-         *  count already sits on the Tracker button badge, and the sentence
-         *  it used to repeat here was clipped by the slim one-card tray. */}
-        <header className="flex items-center justify-between gap-4 px-3.5 pb-1 pt-2">
-          {entries.length === 0 && (
-            <span className="whitespace-nowrap text-[11px] font-medium text-[#9A938A]">
-              Nothing tracked yet
-            </span>
-          )}
+        {/* The header carries ONLY the close control: the count lives on the
+         *  Tracker button badge, and the empty state introduces itself in
+         *  the centered body below instead of an awkward header sentence. */}
+        <header className="flex items-center justify-end px-2.5 pt-2">
           <button
             type="button"
             onClick={onClose}
@@ -267,9 +277,19 @@ export function TrackerTray({
         </header>
 
         {entries.length === 0 ? (
-          <div className="px-3.5 pb-6 pt-2 text-[12px] leading-relaxed text-[#9A938A]">
-            As the agent edits the diagram, each change shows up here so you can
-            trace it back.
+          // Empty state: a small centered stack (mark, title, one quiet
+          // line), not a header sentence with a paragraph hanging under it.
+          <div className="flex flex-col items-center gap-1.5 px-4 pb-5 pt-1 text-center">
+            <History
+              className="h-[18px] w-[18px] text-[#C4BBA9]"
+              strokeWidth={1.8}
+            />
+            <div className="text-[12px] font-medium text-[#6E6353]">
+              Nothing tracked yet
+            </div>
+            <div className="text-[11px] leading-snug text-[#9A938A]">
+              Agent changes to the diagram will land here.
+            </div>
           </div>
         ) : (
           <ol

@@ -36,6 +36,7 @@ import {
   type BlockNodeData,
   type DiagramArrow,
   type DiagramBlock,
+  type DiagramSchema,
   type DiagramView,
 } from "../types";
 import { useEdgeRouting } from "../hooks/useEdgeRouting";
@@ -72,7 +73,7 @@ import { TrackerButton } from "./overlays/TrackerButton";
 import { TrackerTray } from "./overlays/TrackerTray";
 import { ColorSchemeLegend } from "./overlays/ColorSchemeLegend";
 import { useColorScheme } from "../color/useColorScheme";
-import { resolveBlockColor } from "../color/scheme";
+import { resolveBlockColorWithFallback } from "../color/scheme";
 import { BubbleEditOverlays } from "./overlays/BubbleEditOverlays";
 import { ConnectionLensOverlay } from "./overlays/ConnectionLensOverlay";
 import { useConnectionLens } from "../hooks/useConnectionLens";
@@ -83,9 +84,10 @@ import { SurveyPreparingOverlay } from "./overlays/SurveyPreparingOverlay";
 import { IntentChip } from "./overlays/IntentChip";
 import { DiagramFocusPanel } from "./panel/DiagramFocusPanel";
 
-/** Stable empty-blocks reference so useEditingBlocks' effect dep doesn't
- *  change identity every render while no schema is ready. */
+/** Stable empty references so effect deps don't change identity every
+ *  render while no schema is ready. */
 const EMPTY_BLOCKS: DiagramBlock[] = [];
+const EMPTY_ARROWS: DiagramArrow[] = [];
 
 export function DiagramCanvas({
   view,
@@ -216,6 +218,31 @@ function DiagramCanvasInner({
     preserveRegenRef,
   });
 
+  // THE one merged "schema as the user sees it": base plus promoted.
+  // Every label-resolving consumer reads these (bubbles, lens, gates,
+  // cards, tracker chips, color fallbacks, visual-edit guards), so the
+  // merge semantics exist in exactly one place. Promoted blocks live in
+  // their own state slot; any consumer fed only state.schema treats them
+  // as unresolvable ids.
+  const allBlocks = useMemo(
+    () =>
+      state.kind === "ready"
+        ? [...state.schema.blocks, ...promoted.blocks]
+        : EMPTY_BLOCKS,
+    [state, promoted],
+  );
+  const allArrows = useMemo(
+    () =>
+      state.kind === "ready"
+        ? [...state.schema.arrows, ...promoted.arrows]
+        : EMPTY_ARROWS,
+    [state, promoted],
+  );
+  const viewSchema = useMemo<DiagramSchema>(
+    () => ({ blocks: allBlocks, arrows: allArrows }),
+    [allBlocks, allArrows],
+  );
+
   // Hand the edit pulse off to the post-regen glow: once the rebuild is
   // ready, clear the through-regen pulse (recentChanges takes over).
   useEffect(() => {
@@ -290,7 +317,7 @@ function DiagramCanvasInner({
     // colours AND the trace-back ids still resolve (otherwise the "edited" row
     // would be grey and click-dead). The no-regen card path keeps state ready,
     // so the live schema wins there.
-    const readyBlocks = state.kind === "ready" ? state.schema.blocks : [];
+    const readyBlocks = allBlocks;
     const snapMeta = preRegenSnapshotRef.current?.blockMeta;
     const resolve = (
       label: string,
@@ -432,8 +459,9 @@ function DiagramCanvasInner({
     if (detail.target.kind === "arrow") {
       if (detail.option.kind !== "block_level") return;
       const { from, to } = detail.target;
-      const blocks = state.kind === "ready" ? state.schema.blocks : [];
-      recorder.recordLink(blocks, from, to);
+      // Merged view: chips for arrows touching promoted blocks resolve
+      // to labels instead of raw ids.
+      recorder.recordLink(allBlocks, from, to);
       return;
     }
     if (detail.target.kind !== "block") return;
@@ -447,10 +475,9 @@ function DiagramCanvasInner({
     // the edited file mapping back to this block's provenance, which is what
     // kept dropping card edits (e.g. a scraper edit whose file the block's
     // provenance didn't list). Typed-chat edits still come from the delta.
-    const block =
-      state.kind === "ready"
-        ? state.schema.blocks.find((b) => b.id === id)
-        : undefined;
+    // Merged view: a card edit on a PROMOTED block records too (the
+    // base-only lookup silently skipped it).
+    const block = allBlocks.find((b) => b.id === id);
     if (block) recorder.recordEdit(block);
   });
   const prevChatRunningRef = useRef(chatRunning);
@@ -468,20 +495,6 @@ function DiagramCanvasInner({
     return merged;
   }, [fileEditingBlockIds, cardEditBlockIds]);
 
-  // Click-a-block-to-expand-bubbles state. Bubbles are derived from the
-  // block's capabilities (else provenance.functions) and rendered as
-  // fan-laid ReactFlow nodes; viewport pans/zooms to the cluster and
-  // restores on collapse. PROMOTED blocks are merged in: they live in
-  // their own state slot (not state.schema), and feeding only the base
-  // schema made every promoted block silently un-drillable while its
-  // card still advertised its feature count.
-  const bubbleSourceBlocks = useMemo(
-    () =>
-      state.kind === "ready"
-        ? [...state.schema.blocks, ...promoted.blocks]
-        : EMPTY_BLOCKS,
-    [state, promoted],
-  );
   const {
     expandedBlockId,
     bubbleNodes,
@@ -490,7 +503,7 @@ function DiagramCanvasInner({
     clear: clearBubbles,
   } = useBubbleFocus({
     projectKey,
-    blocks: bubbleSourceBlocks,
+    blocks: allBlocks,
     nodes,
   });
 
@@ -520,6 +533,33 @@ function DiagramCanvasInner({
     // muddy khaki band on tinted blocks.
     const TRACE_RING =
       "0 0 0 2px #FAFAF9, 0 0 0 5px #B0975A, 0 0 0 9px rgba(176,151,90,0.22)";
+    // Scheme resolution with the neighbor-inheritance fallback (see
+    // resolveBlockColorWithFallback in color/scheme.ts, shared with the
+    // connection lens so every surface agrees on a fresh block's color).
+    const blockById = new Map(allBlocks.map((b) => [b.id, b]));
+    const neighborInput = (id: string) => {
+      const b = blockById.get(id);
+      return b
+        ? {
+            id: b.id,
+            label: b.label,
+            category: b.category,
+            fileCount: b.provenance?.files.length ?? 0,
+          }
+        : undefined;
+    };
+    const resolveScheme = (n: Node<BlockNodeData>) =>
+      resolveBlockColorWithFallback(
+        activeScheme,
+        {
+          id: n.id,
+          label: n.data.label,
+          category: n.data.category,
+          fileCount: n.data.files?.length ?? 0,
+        },
+        allArrows,
+        neighborInput,
+      );
     const base = nodes.map((n) => {
       const moved = borrowOffsets.get(n.id);
       const dimByFan = expandedBlockId !== null && n.id !== expandedBlockId;
@@ -528,14 +568,10 @@ function DiagramCanvasInner({
       const dim = dimByFan || dimByLens;
       const traced = tracedIds?.has(n.id) ?? false;
       // Resolve this block's fill + accent through the active color
-      // scheme. Done here (not at layout time) so switching schemes
-      // recolors without re-running layout, preserving spatial memory.
-      const resolved = resolveBlockColor(activeScheme, {
-        id: n.id,
-        label: n.data.label,
-        category: n.data.category,
-        fileCount: n.data.files?.length ?? 0,
-      });
+      // scheme (with the neighbor-inheritance fallback above). Done here
+      // (not at layout time) so switching schemes recolors without
+      // re-running layout, preserving spatial memory.
+      const resolved = resolveScheme(n);
       const data = {
         ...n.data,
         colorTint: resolved?.tint,
@@ -578,6 +614,9 @@ function DiagramCanvasInner({
     expandedBlockId,
     lens,
     activeScheme,
+    state,
+    promoted,
+    allBlocks,
     tracedStep,
   ]);
 
@@ -660,6 +699,7 @@ function DiagramCanvasInner({
     setState,
     files,
     bus,
+    viewSchema,
     dismissRecentEdit,
     setSelectedId,
     // Arrows Claude added during a turn, already resolved to block ids.
@@ -668,10 +708,9 @@ function DiagramCanvasInner({
     // them), so this stays a plain read with no state-updater side effects.
     onArrowsLinked: useCallback(
       (links: Array<{ from: string; to: string; label: string }>) => {
-        const blocks = state.kind === "ready" ? state.schema.blocks : [];
-        for (const l of links) recorder.recordLink(blocks, l.from, l.to);
+        for (const l of links) recorder.recordLink(allBlocks, l.from, l.to);
       },
-      [state, recorder],
+      [allBlocks, recorder],
     ),
   });
 
@@ -708,6 +747,7 @@ function DiagramCanvasInner({
     chatMessages,
     state,
     setState,
+    viewBlocks: allBlocks,
     chosenOptionsRef: visualEdit.chosenOptionsRef,
     preRegenSnapshotRef,
     preserveRegenRef,
@@ -864,7 +904,7 @@ function DiagramCanvasInner({
           <ConnectionOptionsOverlay
             target={visualEdit.pendingOptions.target}
             options={visualEdit.pendingOptions.options}
-            blocks={state.schema.blocks}
+            blocks={allBlocks}
             onPick={visualEdit.handlePickOption}
             onCancel={visualEdit.handleCancelOptions}
           />
@@ -879,7 +919,7 @@ function DiagramCanvasInner({
                   : "module"
             }
             target={visualEdit.intentGate.target}
-            blocks={state.schema.blocks}
+            blocks={allBlocks}
             onAskSuggestions={visualEdit.handleIntentGateAskSuggestions}
             onDescribe={visualEdit.handleIntentGateDescribe}
             onCancel={visualEdit.handleIntentGateCancel}
@@ -982,19 +1022,31 @@ function DiagramCanvasInner({
           (() => {
             // Resolve the two endpoint blocks' colors through the active
             // scheme so the lens header can tint each end to match its
-            // block on the canvas (instead of an arbitrary accent).
+            // block on the canvas. Uses the SAME neighbor-inheritance
+            // fallback as the canvas nodes, so a scheme-unknown block
+            // (created or promoted after the scheme was generated) shows
+            // one consistent inherited color in both places.
             const ln = connection.lens;
-            const blocks = state.schema.blocks;
+            const blocks = allBlocks;
+            const schemeInput = (b: DiagramBlock) => ({
+              id: b.id,
+              label: b.label,
+              category: b.category,
+              fileCount: b.provenance?.files.length ?? 0,
+            });
             const accentOf = (id: string): string | null => {
               const b = blocks.find((x) => x.id === id);
               if (!b) return null;
               return (
-                resolveBlockColor(activeScheme, {
-                  id: b.id,
-                  label: b.label,
-                  category: b.category,
-                  fileCount: b.provenance.files.length,
-                })?.accent ?? null
+                resolveBlockColorWithFallback(
+                  activeScheme,
+                  schemeInput(b),
+                  allArrows,
+                  (nid) => {
+                    const nb = blocks.find((x) => x.id === nid);
+                    return nb ? schemeInput(nb) : undefined;
+                  },
+                )?.accent ?? null
               );
             };
             return (

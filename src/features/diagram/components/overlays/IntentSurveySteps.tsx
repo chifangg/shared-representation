@@ -20,9 +20,9 @@ import { capabilityIcon } from "../../util/capabilityIcon";
 
 const SECTION_LABEL = "text-[12px] font-semibold text-[#5C544B]";
 const TEXT_FIELD =
-  "w-full rounded-xl border border-[#E7E2DA] bg-white px-3 py-2 text-[13px] text-[#2A2622] transition-colors placeholder:text-[#B6AC9E] hover:border-[#D8CFC2]";
+  "w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-[13px] text-[#2A2622] outline-none transition-colors placeholder:text-[#B6AC9E] hover:border-[#D8CFC2] focus:border-[#C9B58E]";
 const CHIP_IDLE =
-  "border border-[#E2DBD0] bg-white text-[#5C544B] hover:-translate-y-px hover:border-[#C9BFB1] hover:bg-[#FCF8F1]";
+  "border border-white/70 bg-white/75 text-[#5C544B] hover:-translate-y-px hover:border-[#C9BFB1] hover:bg-white";
 const CHIP_SELECTED = "border border-[#C99E84] bg-[#FBF1EB] text-[#8A5A3C]";
 
 export function composeGoal(params: IntentSelection): string {
@@ -144,7 +144,7 @@ export function UnderstandStep({
         <textarea
           value={understandText}
           onChange={(e) => setUnderstandText(e.target.value)}
-          placeholder="e.g. how the data flow works end-to-end"
+          placeholder="How the data flow works end-to-end"
           rows={2}
           className={`resize-none ${TEXT_FIELD}`}
         />
@@ -198,12 +198,15 @@ export function CapabilityStep({
                         : CHIP_IDLE
                     }`}
                   >
-                    <Icon
-                      className={`mt-0.5 h-[18px] w-[18px] shrink-0 ${
-                        on ? "text-[#A66B49]" : "text-[#A89D8E]"
+                    {/* Icon rides in a soft circle so the rows share the
+                     *  same visual vocabulary as the verb cards. */}
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                        on ? "bg-[#F4E4D8] text-[#A66B49]" : "bg-[#F4F0E8] text-[#A89D8E]"
                       }`}
-                      strokeWidth={2}
-                    />
+                    >
+                      <Icon className="h-4 w-4" strokeWidth={2} />
+                    </span>
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="text-[13.5px] font-semibold text-[#2A2622]">
                         {c.label}
@@ -226,7 +229,7 @@ export function CapabilityStep({
               })}
             </div>
             {/* Soft fade hinting the list scrolls past the visible edge. */}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-xl bg-gradient-to-t from-[#FCFBF9] to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-xl bg-gradient-to-t from-[#FBFAF6]/90 to-transparent" />
           </div>
         ) : (
           <ScanStatus scanState={scanState} />
@@ -245,7 +248,7 @@ export function CapabilityStep({
           setFreeText(e.target.value);
           if (e.target.value.trim()) clearCapabilities();
         }}
-        placeholder="Describe in your own words, e.g. add a new publication entry"
+        placeholder="Describe it in your own words"
         className={TEXT_FIELD}
       />
     </div>

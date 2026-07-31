@@ -237,6 +237,21 @@ export function ChatView({ model }: { model?: string }) {
     running,
     activityEntries.length,
   ]);
+  // The effect above only fires when React state identities change, but the
+  // transcript also GROWS between those commits: streamed markdown, code
+  // blocks expanding, diagram chips mounting. Mid-turn the view visibly
+  // stalled while the agent kept writing below the fold. Watch the DOM
+  // itself and re-pin on every mutation while stuck to the bottom.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const pin = () => {
+      if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+    };
+    const mo = new MutationObserver(pin);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }, []);
 
   return (
     <div

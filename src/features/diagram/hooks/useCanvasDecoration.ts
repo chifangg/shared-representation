@@ -81,6 +81,11 @@ export function useCanvasDecoration({
    */
   const attachInteractive = useCallback(
     (laidNodes: Node<BlockNodeData>[]) => {
+      // Promoted detail blocks cannot be renamed: the rename pipeline
+      // writes state.schema only, so on them it was a silent no-op.
+      // Omitting the handler removes the affordance entirely (BlockNode
+      // gates the double-click rename on its presence).
+      const promotedIds = new Set(promoted.blocks.map((b) => b.id));
       const result = laidNodes.map((n) => {
         const dragged = userPositionsRef.current.get(n.id);
         return {
@@ -95,8 +100,9 @@ export function useCanvasDecoration({
               recentChanges?.blockIds.has(n.id) ?? false,
             isEditing:
               editingBlockIds.has(n.id) || editRegenIds.has(n.id),
-            onLabelChange: (newLabel: string) =>
-              handleRenameBlock(n.id, newLabel),
+            onLabelChange: promotedIds.has(n.id)
+              ? undefined
+              : (newLabel: string) => handleRenameBlock(n.id, newLabel),
             onActions: () => handleBlockAction(n.id),
           },
         };
@@ -118,6 +124,7 @@ export function useCanvasDecoration({
       recentChanges,
       editingBlockIds,
       editRegenIds,
+      promoted,
       userPositionsRef,
     ],
   );

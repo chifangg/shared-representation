@@ -30,16 +30,30 @@ export function DiagramFetchOverlay({
     // user can actually see what's been generated. Replace it with a
     // small bottom-right chip indicating Claude is still streaming.
     if (nodeCount > 0) {
+      // Header-chrome material (#DCDBD6 band, #33322F ink), sized up a
+      // step from the old white pill that vanished against the canvas.
+      // Progress indicators are chrome, so they wear the chrome palette
+      // instead of introducing yet another color family.
       return (
-        <div className="pointer-events-none absolute bottom-3 right-3 z-50 flex items-center gap-2 rounded-full border border-[#D4D4D4] bg-white/95 px-3 py-1.5 text-xs text-[#484848] shadow-md">
-          <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
-          <span>Generating more — {nodeCount} so far</span>
+        <div className="pointer-events-none absolute bottom-3 right-3 z-50 flex items-center gap-2 rounded-full border border-[#C9C8C3] bg-[#DCDBD6]/95 px-3.5 py-2 text-[12.5px] text-[#5A5954] shadow-[0_8px_20px_-8px_rgba(51,50,47,0.4)]">
+          <Loader2
+            className="h-3.5 w-3.5 animate-spin text-[#6E6D68]"
+            strokeWidth={2}
+          />
+          <span>
+            Generating more ·{" "}
+            <span className="font-semibold text-[#33322F]">{nodeCount}</span>{" "}
+            so far
+          </span>
           <ElapsedClock startedAt={state.startedAt} />
         </div>
       );
     }
     return (
-      <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-white/40 backdrop-blur-[1px]">
+      // Same warm scrim as the gate and survey overlays. The old pale
+      // white wash left NOTHING for the frosted card to show through, so
+      // the glass read as a plain white rectangle.
+      <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-[#2A2622]/25 backdrop-blur-[2px]">
         <DiagramLoadingCard startedAt={state.startedAt} />
       </div>
     );

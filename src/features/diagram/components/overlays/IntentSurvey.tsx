@@ -159,11 +159,14 @@ export function IntentSurvey({
       }}
     >
       <div
-        className="survey-card-in relative w-[min(660px,calc(100%-48px))] overflow-hidden rounded-[22px] border border-[#E7E2DA] bg-[#FCFBF9] shadow-[0_24px_70px_-20px_rgba(60,53,47,0.45)]"
+        className="survey-card-in glass-card relative w-[min(660px,calc(100%-48px))] overflow-hidden rounded-[22px]"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Warm header band with a soft sand to paper gradient. */}
-        <div className="bg-gradient-to-br from-[#F6F0E6] to-[#FCFBF9] px-6 pb-4 pt-5">
+        {/* Warm header band: a translucent sand wash fading VERTICALLY to
+         *  fully transparent, so it dissolves into the frosted body with no
+         *  visible seam (a diagonal fade left a hard edge where the band
+         *  ended), and the card stays frosted under it. */}
+        <div className="bg-gradient-to-b from-[#F6F0E6]/70 to-transparent px-6 pb-4 pt-5">
           <div className="flex items-center justify-between">
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[#A89D8E]">
               {verb ? "Tell us a bit more" : "Before we draw"}
@@ -185,7 +188,7 @@ export function IntentSurvey({
           <div className="mt-1.5 flex items-center gap-2.5">
             {activeVerb && (
               <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
                 style={{ background: activeVerb.tint, color: activeVerb.accent }}
               >
                 <activeVerb.icon className="h-[15px] w-[15px]" strokeWidth={2.2} />
@@ -208,10 +211,10 @@ export function IntentSurvey({
                   type="button"
                   onClick={() => setVerb(v.value)}
                   style={{ animationDelay: `${i * 55}ms` }}
-                  className="survey-rise group flex items-start gap-3 rounded-2xl border border-[#E7E2DA] bg-white px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[#D8CFC2] hover:shadow-[0_10px_26px_-14px_rgba(60,53,47,0.5)]"
+                  className="survey-rise group flex items-start gap-3 rounded-2xl border border-white/70 bg-white/75 px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[#D8CFC2] hover:bg-white hover:shadow-[0_10px_26px_-14px_rgba(60,53,47,0.5)]"
                 >
                   <span
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-transform duration-200 group-hover:scale-105"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-transform duration-200 group-hover:scale-105"
                     style={{ background: v.tint, color: v.accent }}
                   >
                     <v.icon className="h-[18px] w-[18px]" strokeWidth={2} />

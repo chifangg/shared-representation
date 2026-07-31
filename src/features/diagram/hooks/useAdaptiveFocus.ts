@@ -75,11 +75,14 @@ export function useAdaptiveFocus({
     filesRef.current = files;
   }, [files]);
 
-  // Reset on user-initiated project change.
+  // Reset on user-initiated project change. The consumed-round counter
+  // resets too: with consume-on-completion it would otherwise carry the
+  // OLD project's count and swallow the new project's first focus round.
   useEffect(() => {
     setFocused(null);
     setRegenerating(false);
     setEmptyRound(false);
+    lastUserCountRef.current = 0;
   }, [projectKey]);
 
   // Count completed user turns. A turn increment signals "user just
@@ -96,7 +99,10 @@ export function useAdaptiveFocus({
     if (state.kind !== "ready") return;
     if (filesRef.current.length === 0) return;
     if (userMessageCount === lastUserCountRef.current) return;
-    lastUserCountRef.current = userMessageCount;
+    // NOT consumed here: the count is only consumed when the round
+    // COMPLETES (see below). Consuming at start meant a round aborted by
+    // closing the panel could never re-run: on re-entry the count looked
+    // already handled and the panel dead-ended on the wiped focus state.
     if (userMessageCount === 0) return;
 
     // Open the side panel in its loading state IMMEDIATELY (before the
@@ -181,6 +187,10 @@ export function useAdaptiveFocus({
             },
           });
           if (controller.signal.aborted) return;
+          // The round genuinely finished: consume its trigger. Errors and
+          // aborts deliberately do NOT consume, so toggling the panel
+          // re-runs the interrupted round instead of showing it empty.
+          lastUserCountRef.current = userMessageCount;
           // Edge: focus event arrived but no detail_block ever did.
           if (newDetailBlocks.length === 0 && newFocusedIds.length > 0) {
             setFocused({

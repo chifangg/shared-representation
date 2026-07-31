@@ -182,14 +182,21 @@ export function layoutSchema(
   if (islands.length > 0) {
     const colStride = NODE_W + ISLAND_GAP_X;
     const hasSpine = Number.isFinite(spineMinX);
-    // Indent past the bottom-left chrome, but never so far that not even
-    // one column fits inside the spine's width.
+    // Indent past the bottom-left chrome, but ONLY when a spine exists:
+    // that is the case where the band sits under a real diagram whose
+    // bottom-left corner the floating chrome covers. With NO spine (the
+    // pre-arrow streaming phase, when every block is still an island) the
+    // camera fits the island grid itself, and indenting it just parked
+    // the staging area 320 units right of where the spine would form, so
+    // the whole canvas lurched when the arrows landed and everything
+    // snapped into rank. Also never indent so far that not even one
+    // column fits inside the spine's width.
     const indent = hasSpine
       ? Math.min(
           ISLAND_CHROME_INDENT,
           Math.max(0, spineMaxX - spineMinX - NODE_W),
         )
-      : ISLAND_CHROME_INDENT;
+      : 0;
     const startX = (hasSpine ? spineMinX : 20) + indent;
     const startY = hasSpine ? spineMaxY + ISLAND_BAND_GAP : 20;
     const bandWidth = hasSpine ? spineMaxX - startX : colStride * 4 - ISLAND_GAP_X;
