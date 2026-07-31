@@ -5,7 +5,7 @@ import { NODE_H, NODE_W } from "../layout/constants";
 import {
   buildBubbleAndSectorNodes,
   bubbleItemsForBlock,
-  clusterFocusCenter,
+  clusterFocusBounds,
 } from "../layout/bubbleNodes";
 
 /**
@@ -24,8 +24,12 @@ import {
  * them just toggles selection, no viewport zoom into an empty cluster.
  */
 
-/** Zoom level while the cluster is the visual focus. */
-const FOCUS_ZOOM = 1.25;
+/** Minimum framed rect (world units) for the cluster fit, centred on the
+ *  cluster. Caps how far a small fan can zoom IN (fitBounds has no maxZoom),
+ *  so a 1-2 bubble fan stays at a comfortable distance while a larger fan
+ *  frames its true, bigger bounds. */
+const MIN_FOCUS_W = 520;
+const MIN_FOCUS_H = 400;
 
 /** Bubble pop animation timing — kept in sync with the CSS keyframes
  *  in styles.css. Slower than the previous 250ms so the radial motion
@@ -139,20 +143,31 @@ export function useBubbleFocus({
           n.type !== "bubbleSector",
       )
       .map((n) => ({ x: n.position.x, y: n.position.y }));
-    const focus = block
-      ? clusterFocusCenter({
+    const bounds = block
+      ? clusterFocusBounds({
           block,
           blockPosition: blockNode.position,
           otherBlocks,
         })
       : {
-          x: blockNode.position.x + NODE_W / 2,
-          y: blockNode.position.y + NODE_H / 2,
+          x: blockNode.position.x,
+          y: blockNode.position.y,
+          width: NODE_W,
+          height: NODE_H,
         };
-    reactFlow.setCenter(focus.x, focus.y, {
-      zoom: FOCUS_ZOOM,
-      duration: VIEWPORT_MS,
-    });
+    // Frame the WHOLE cluster so the zoom scales with the fan size (and the
+    // available pane): more bubbles -> zoom out so they all fit, instead of
+    // a fixed zoom that lands too close once a bubble edit adds more. A
+    // minimum rect (centred on the cluster) caps how far a tiny 1-2 bubble
+    // fan can zoom IN, since fitBounds has no maxZoom option.
+    const cx = bounds.x + bounds.width / 2;
+    const cy = bounds.y + bounds.height / 2;
+    const w = Math.max(bounds.width, MIN_FOCUS_W);
+    const h = Math.max(bounds.height, MIN_FOCUS_H);
+    reactFlow.fitBounds(
+      { x: cx - w / 2, y: cy - h / 2, width: w, height: h },
+      { padding: 0.16, duration: VIEWPORT_MS },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedBlockId]);
 

@@ -85,9 +85,11 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
     !!data.colorAccent;
   const catStyle = colored
     ? {
+        // Category now reads as a soft tint fill inside a thin full-accent
+        // outline, not a chunky dark left bar (the old borderLeftWidth: 4
+        // read as heavy and ugly). Same colour information, calmer edge.
         backgroundColor: data.colorTint,
         borderColor: data.colorAccent,
-        borderLeftWidth: 4,
       }
     : !data.isPending && !data.isContainer
       ? {
@@ -97,14 +99,38 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
           // "uncategorized", not broken-white.
           backgroundColor: "#F0ECE4",
           borderColor: "#D2CABB",
-          borderLeftWidth: 4,
         }
       : undefined;
   return (
     <div
-      className={`block-node-grow group/block relative rounded-lg border bg-white px-3 py-2 transition-all ${borderColor} ${ring} ${dim}`}
+      className={`block-node-grow group/block relative rounded-[5px] border bg-white px-3 py-2 transition-all ${borderColor} ${ring} ${dim}`}
       style={{ width: NODE_W, minHeight: NODE_H, ...catStyle }}
     >
+      {/* Small corner mark on a block promoted out of a detail view, so
+       *  back on the overview it reads as a lifted detail rather than a
+       *  top-level module. Same glyph the tracker uses for "promoted",
+       *  keeping one visual vocabulary for the concept. */}
+      {data.promotedDetail && (
+        <span
+          title="Promoted from block details"
+          className="absolute right-1.5 top-1.5 text-[#8A8276]"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-3 w-3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x={4.5} y={3.5} width={15} height={8} rx={2.5} />
+            <circle cx={12} cy={19} r={2.6} />
+            <path d="M12 16 V13" />
+          </svg>
+        </span>
+      )}
       {/* Per-block action affordance ("⋯") — appears at top-right on
        *  block hover, opens the cards overlay so the user can pick a
        *  Claude-proposed change scoped to this block. Stops click +
@@ -158,19 +184,19 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
         id="t"
         type="source"
         position={Position.Top}
-        className="!h-3 !w-3 !-translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-60 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className="!h-3 !w-3 !-translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
       />
       <Handle
         id="r"
         type="source"
         position={Position.Right}
-        className="!h-3 !w-3 !translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-60 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className="!h-3 !w-3 !translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
       />
       <Handle
         id="l"
         type="source"
         position={Position.Left}
-        className="!h-3 !w-3 !-translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-60 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className="!h-3 !w-3 !-translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
       />
       {editing ? (
         <input
@@ -252,7 +278,7 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
         id="b"
         type="source"
         position={Position.Bottom}
-        className="!h-3 !w-3 !translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-60 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className="!h-3 !w-3 !translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
       />
     </div>
   );

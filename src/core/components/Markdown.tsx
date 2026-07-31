@@ -11,6 +11,11 @@ import { cn } from "@/lib/utils";
  * Anything beyond that (math, mermaid, custom components) is a fork
  * concern — pass `components` or additional `remarkPlugins` via props.
  */
+/** Module constant, NOT an inline literal. A fresh `[remarkGfm]` array on
+ *  every render changes the prop identity, which defeats react-markdown's
+ *  memoization and re-parses the whole message through remark each time. */
+const REMARK_PLUGINS = [remarkGfm];
+
 export function Markdown({
   children,
   className,
@@ -22,7 +27,7 @@ export function Markdown({
 }) {
   return (
     <div className={cn("prose prose-sm max-w-none", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} {...rest}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components} {...rest}>
         {children}
       </ReactMarkdown>
     </div>

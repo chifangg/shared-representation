@@ -178,22 +178,23 @@ export function useCanvasDecoration({
     [recentChanges],
   );
 
-  // Re-layout when selection toggles, so dagre makes room for the
-  // expanded block and surrounding nodes glide via CSS transition.
+  // Re-render base canvas; also the selection re-layout (selectedId is a
+  // dep), so dagre makes room for an expanded block. There used to be a
+  // second, earlier effect doing the selection pass WITHOUT the promoted
+  // blocks merged in; both fired on the same commits and only effect
+  // ordering kept promoted blocks on the canvas, so it was removed.
+  // Detail blocks live in the side panel by default; the user can promote
+  // individual ones into the main diagram and from then on they layout
+  // alongside base blocks.
   useEffect(() => {
     if (state.kind !== "ready") return;
-    const laid = layoutSchema(state.schema, selectedId);
-    setNodes(attachInteractive(laid.nodes));
-    setEdges(tagRecentEdges(laid.edges));
-  }, [selectedId, state, setNodes, setEdges, attachInteractive, tagRecentEdges]);
-
-  // Re-render base canvas. Detail blocks live in the side panel by
-  // default; the user can promote individual ones into the main
-  // diagram and from then on they layout alongside base blocks.
-  useEffect(() => {
-    if (state.kind !== "ready") return;
+    // Blocks the user explicitly promoted onto the canvas stay exempt
+    // from the focus dim: fogging the thing they JUST pulled out of the
+    // panel read as the canvas rejecting it.
     const focusedIds =
-      view === "focus" && focused ? focused.ids : null;
+      view === "focus" && focused
+        ? [...focused.ids, ...promoted.blocks.map((b) => b.id)]
+        : null;
     const merged: DiagramSchema = {
       blocks: [...state.schema.blocks, ...promoted.blocks],
       arrows: [...state.schema.arrows, ...promoted.arrows],

@@ -14,14 +14,21 @@ export function BubbleEditOverlays({
   blocks,
   files,
   detail,
+  settled,
   onCloseDetail,
   onConfirmDetail,
 }: {
   blocks: DiagramBlock[];
   files: FileEntry[];
   detail: BubbleDetailTarget | null;
+  /** True once the open zoom-out has finished, so the card may draw itself. */
+  settled: boolean;
   onCloseDetail: () => void;
-  onConfirmDetail: (blockId: string, instruction: string) => void;
+  onConfirmDetail: (
+    blockId: string,
+    instruction: string,
+    summary: string,
+  ) => void;
 }) {
   if (!detail) return null;
   const block = blocks.find((b) => b.id === detail.blockId);
@@ -37,9 +44,18 @@ export function BubbleEditOverlays({
       displayLabel={detail.displayLabel}
       blockLabel={block.label}
       files={detailFiles}
-      anchor={{ x: detail.x, y: detail.y }}
+      anchor={{
+        fx: detail.fx,
+        fy: detail.fy,
+        r: detail.r,
+        dirX: detail.dirX,
+        dirY: detail.dirY,
+      }}
+      settled={settled}
       onClose={onCloseDetail}
-      onConfirm={(instruction) => onConfirmDetail(detail.blockId, instruction)}
+      onConfirm={(instruction, summary) =>
+        onConfirmDetail(detail.blockId, instruction, summary)
+      }
     />
   );
 }

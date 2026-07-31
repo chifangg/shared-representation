@@ -1,27 +1,22 @@
-import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { CapabilityScanState } from "../../types";
-import { ElapsedClock } from "../nodes/ElapsedClock";
+import { LoadingMark } from "./LoadingMark";
 
 /**
- * Pre-survey intro overlay. The capability_scan typically takes ~15s,
- * so instead of a bare spinner we play a short staggered intro that
- * orients the user while the scan runs in the background.
+ * Post-upload intro, kept to almost nothing: the product's own mark looping
+ * while the codebase scan (~15s) runs, plus one line of copy. No headline, no
+ * spinner, no seconds counter, no paragraph to read. The looping mark is the
+ * liveness signal, so a wait of unknown length stays calm without a progress
+ * bar that could stall or lie.
  *
- * It calls onReady once its scripted timeline finishes (INTRO_MS). The
- * parent only swaps in the real survey once BOTH the intro is done AND
- * the scan resolved. If the scan is still running when the intro
- * ends, this overlay drops into a graceful "almost ready" tail (spinner
- * + elapsed clock) instead of snapping to an ugly loader.
+ * onReady fires after a short beat so the parent can swap in the survey the
+ * moment the scan resolves.
  */
 
-const INTRO_MS = 9800;
+const READY_MS = 1400;
 
-const LINES = [
-  "This is the canvas where your project's architecture will take shape.",
-  "Before you draw anything, we'd like to know what you came here to do.",
-  "Reading through your files to surface what this project can do…",
-];
+const LINE = "We'll start your diagram with a quick onboarding.";
+const LINE_LONG = "Reading your files. This can take a moment.";
 
 export function SurveyPreparingOverlay({
   scanState,
@@ -30,57 +25,34 @@ export function SurveyPreparingOverlay({
   scanState: CapabilityScanState;
   onReady: () => void;
 }) {
-  const startedAt = useRef(Date.now()).current;
-  const [introDone, setIntroDone] = useState(false);
+  const [longWait, setLongWait] = useState(false);
 
   useEffect(() => {
-    const id = setTimeout(() => {
-      setIntroDone(true);
-      onReady();
-    }, INTRO_MS);
-    return () => clearTimeout(id);
+    const ready = window.setTimeout(onReady, READY_MS);
+    const long = window.setTimeout(() => setLongWait(true), 12000);
+    return () => {
+      window.clearTimeout(ready);
+      window.clearTimeout(long);
+    };
   }, [onReady]);
 
-  const stalled =
-    introDone && scanState.kind !== "ready" && scanState.kind !== "error";
+  const errored = scanState.kind === "error";
+  const line = errored
+    ? "Could not finish reading. You can still describe what you want."
+    : longWait
+      ? LINE_LONG
+      : LINE;
 
   return (
-    <div className="survey-overlay-in pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-[#2A2622]/30 backdrop-blur-[3px]">
-      <div className="survey-card-in w-[min(520px,calc(100%-48px))] overflow-hidden rounded-[22px] border border-[#E7E2DA] bg-[#FCFBF9] shadow-[0_24px_70px_-20px_rgba(60,53,47,0.45)]">
-        <div className="bg-gradient-to-br from-[#F6F0E6] to-[#FCFBF9] px-7 pb-6 pt-7">
-          {/* Warm typographic greeting instead of an icon badge. A
-           *  lowercase serif italic "hi" in the clay accent reads as a
-           *  human hello and stays in the muted palette, no sparkle-AI
-           *  cliché. */}
-          <span
-            className="survey-rise inline-block font-serif text-[34px] italic leading-none tracking-tight text-[#A66B49]"
-            style={{ animationDelay: "120ms" }}
-          >
-            hi!
-          </span>
-          <div className="mt-4 flex flex-col gap-3">
-            {LINES.map((line, i) => (
-              <p
-                key={i}
-                className="survey-rise text-[15px] font-medium leading-snug text-[#2A2622]"
-                style={{ animationDelay: `${500 + i * 2400}ms` }}
-              >
-                {line}
-              </p>
-            ))}
-          </div>
-          <div
-            className="survey-rise mt-5 flex items-center gap-2 text-[12.5px] text-[#8A8178]"
-            style={{ animationDelay: "7400ms" }}
-          >
-            <Loader2
-              className="h-3.5 w-3.5 animate-spin text-[#A66B49]"
-              strokeWidth={2}
-            />
-            <span>{stalled ? "Almost ready…" : "Preparing your options…"}</span>
-            {stalled && <ElapsedClock startedAt={startedAt} />}
-          </div>
-        </div>
+    <div className="survey-overlay-in pointer-events-auto absolute inset-0 z-[80] flex items-center justify-center bg-[#2A2622]/28 backdrop-blur-[3px]">
+      <div className="edp-plane flex w-[min(400px,calc(100%-48px))] flex-col items-center gap-5 rounded-2xl border border-[#E7E2DA] bg-[#FCFBF9] px-8 py-10 text-center shadow-[0_18px_50px_-24px_rgba(60,53,47,0.35)]">
+        <LoadingMark />
+        <p
+          className="mark-fade-in max-w-[30ch] text-[14.5px] leading-relaxed text-[#5C554B] transition-opacity duration-300"
+          style={{ animationDelay: "200ms" }}
+        >
+          {line}
+        </p>
       </div>
     </div>
   );

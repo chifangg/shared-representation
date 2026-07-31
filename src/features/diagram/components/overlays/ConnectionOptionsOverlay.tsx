@@ -67,29 +67,30 @@ export function ConnectionOptionsOverlay({
     );
   } else if (target.kind === "block") {
     const block = blocks.find((b) => b.id === target.id);
-    headerEyebrow = "Pick a block action";
+    headerEyebrow = "Pick a change";
     headerLine = (
       <>
-        for block{" "}
-        <span className="font-semibold">{block?.label ?? target.id}</span>
+        for <span className="font-semibold">{block?.label ?? target.id}</span>
       </>
     );
   } else {
-    headerEyebrow = "Pick a new module";
+    headerEyebrow = "Pick a new block";
     headerLine = <>to add to the project</>;
   }
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-[#0F172A]/30 backdrop-blur-[2px]"
+      className="gate-backdrop pointer-events-auto absolute inset-0 z-[60] flex items-center justify-center bg-[#2A2622]/25 backdrop-blur-[2px]"
       onMouseDown={(e) => {
         // Clicking the backdrop cancels (only when the click landed
         // on the backdrop itself, not inside the panel).
         if (e.target === e.currentTarget) onCancel();
       }}
     >
+      {/* Same frosted-glass material and entrance as the intent gate, so
+       *  the two beats of one flow (gate, then cards) read as one surface. */}
       <div
-        className="w-[min(760px,calc(100%-48px))] rounded-2xl border border-[#78716C]/30 bg-white p-5 shadow-2xl"
+        className="gate-card glass-card w-[min(760px,calc(100%-48px))] rounded-2xl p-5"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
@@ -117,7 +118,7 @@ export function ConnectionOptionsOverlay({
         ))}
         {/* "Others" card: expand to text input, submit free-form intent. */}
         <div
-          className={`flex flex-col items-start gap-2 rounded-xl border border-dashed border-[#D8D2C8] bg-[#FBFAF8] p-3.5 transition-colors ${
+          className={`flex flex-col items-start gap-2 rounded-xl border border-dashed border-[#D8D2C8] bg-white/60 p-3.5 transition-colors ${
             othersExpanded
               ? ""
               : "cursor-pointer hover:border-[#C9B58E] hover:bg-[#F7F5F1]"

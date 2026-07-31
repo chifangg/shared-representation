@@ -80,7 +80,7 @@ const MIN_SUMMARY_DOC_CHARS = 200;
 /** Cap on the summary doc itself, so a huge README can't blow the budget. */
 const SUMMARY_DOC_CAP = 24 * 1024;
 
-function findSummaryDoc(files: FileEntry[]): FileEntry | null {
+export function findSummaryDoc(files: FileEntry[]): FileEntry | null {
   for (const name of SUMMARY_DOC_NAMES) {
     const matches = files.filter(
       (f) =>

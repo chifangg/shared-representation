@@ -27,7 +27,7 @@ export function OptionCardButton({
     <button
       type="button"
       onClick={onClick}
-      className="group flex flex-col items-start gap-2 rounded-xl border border-[#E7E2DA] bg-white p-3.5 text-left transition-all duration-150 hover:-translate-y-px hover:border-[#C9B58E] hover:shadow-[0_4px_14px_rgba(120,113,108,0.12)]"
+      className="group flex flex-col items-start gap-2 rounded-xl border border-white/70 bg-white/80 p-3.5 text-left transition-all duration-150 hover:-translate-y-px hover:border-[#C9B58E] hover:bg-white hover:shadow-[0_4px_14px_rgba(120,113,108,0.12)]"
     >
       <span
         className="inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold tracking-tight"

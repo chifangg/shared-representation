@@ -30,9 +30,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useProject } from "@/core/project";
 import { useChatActivity } from "@/core/chatActivity";
-import { categoryStyle } from "../util/blockCategory";
 import { DiagramActionEntry } from "./overlays/DiagramActionEntry";
 import {
+  type BlockCategory,
   type BlockNodeData,
   type DiagramArrow,
   type DiagramBlock,
@@ -51,6 +51,12 @@ import { useEditSummary } from "../hooks/useEditSummary";
 import { useChatSettleEffect } from "../hooks/useChatSettleEffect";
 import { useCanvasFit } from "../hooks/useCanvasFit";
 import { useViewportFocusFit } from "../hooks/useViewportFocusFit";
+import {
+  useInteractionTracker,
+  type TracedStep,
+} from "../hooks/useInteractionTracker";
+import { blockChip, useTrackerRecorder } from "../hooks/useTrackerRecorder";
+import { useTraceFit } from "../hooks/useTraceFit";
 import { useBubbleFocus } from "../hooks/useBubbleFocus";
 import { useEditingBlocks } from "../hooks/useEditingBlocks";
 import { useVisualEditHandlers } from "../hooks/useVisualEditHandlers";
@@ -61,8 +67,9 @@ import { edgeTypes } from "./nodes/LabeledEdge";
 import { ConnectionOptionsOverlay } from "./overlays/ConnectionOptionsOverlay";
 import { IntentGate } from "./overlays/IntentGate";
 import { DiagramFetchOverlay } from "./overlays/DiagramFetchOverlay";
-import { EditSummaryToast } from "./overlays/EditSummaryToast";
 import { DiagramControls } from "./overlays/DiagramControls";
+import { TrackerButton } from "./overlays/TrackerButton";
+import { TrackerTray } from "./overlays/TrackerTray";
 import { ColorSchemeLegend } from "./overlays/ColorSchemeLegend";
 import { useColorScheme } from "../color/useColorScheme";
 import { resolveBlockColor } from "../color/scheme";
@@ -84,6 +91,7 @@ export function DiagramCanvas({
   view,
   onViewChange,
   headerSlot,
+  headerRightSlot,
 }: {
   view: DiagramView;
   /** Switch the diagram view. The overview/focus toggle now lives on the
@@ -92,6 +100,8 @@ export function DiagramCanvas({
   /** DOM node in the panel header where the intent chip portals itself,
    *  so it lives in the chrome instead of floating over the canvas. */
   headerSlot?: HTMLElement | null;
+  /** Right-aligned header slot for the interaction-tracker button. */
+  headerRightSlot?: HTMLElement | null;
 }) {
   return (
     <ReactFlowProvider>
@@ -99,6 +109,7 @@ export function DiagramCanvas({
         view={view}
         onViewChange={onViewChange}
         headerSlot={headerSlot}
+        headerRightSlot={headerRightSlot}
       />
     </ReactFlowProvider>
   );
@@ -108,10 +119,12 @@ function DiagramCanvasInner({
   view,
   onViewChange,
   headerSlot,
+  headerRightSlot,
 }: {
   view: DiagramView;
   onViewChange: (v: DiagramView) => void;
   headerSlot?: HTMLElement | null;
+  headerRightSlot?: HTMLElement | null;
 }) {
   const { files, chatMessages, chatRunning, projectKey } = useProject();
   const bus = useDiagramBus();
@@ -148,7 +161,7 @@ function DiagramCanvasInner({
   // Connection-lens overlay (arrow-label pill drill-in). Owns its state,
   // the bus subscribe, reset, and the zoom-to-edge; the card floats next
   // to the clicked pill.
-  const connection = useConnectionLens(projectKey, nodes);
+  const connection = useConnectionLens(projectKey);
 
   // Positions the user has dragged blocks to, keyed by block id. Re-laid
   // out nodes (e.g. when selection toggles or a bubble cluster opens)
@@ -221,10 +234,42 @@ function DiagramCanvasInner({
     projectKey,
   });
 
-  // recentChanges (the glow) + editSummary (the toast) lifecycles.
+  // Interaction tracker: the ordered list of agent-driven diagram changes
+  // (fed at the change points below), whether the tray is open, and which
+  // step the user is currently tracing back (drives a gold ring + a camera
+  // move, never any state change). Declared before the glow hook so the
+  // per-regen delta can feed it.
+  const tracker = useInteractionTracker(projectKey);
+  // Row assembly (chips, accent fallback, dedupe keys) lives in the
+  // recorder so each change point below is a one-line record* call.
+  const recorder = useTrackerRecorder(tracker.addEntry);
+  const trackerSelect = tracker.select;
+  const [trackerOpen, setTrackerOpen] = useState(false);
+  // The Tracker header button, so its dropdown tray can anchor beneath it.
+  const trackerBtnRef = useRef<HTMLButtonElement>(null);
+  const [tracedStep, setTracedStep] = useState<TracedStep>(null);
+  // A trace-back highlight is a transient INSPECTION. Clear it (ring + tray
+  // row selection) the moment the user starts a new turn: both typed chat and
+  // visual edits flip chatRunning, so this fires before the ensuing regen,
+  // which means the traced block fogs normally with the rest instead of
+  // lingering highlighted. (Also cleared on pane-click and tray-close.)
+  const clearTrace = useCallback(() => {
+    setTracedStep(null);
+    trackerSelect(null);
+  }, [trackerSelect]);
+  useEffect(() => {
+    if (chatRunning) clearTrace();
+  }, [chatRunning, clearTrace]);
+
+  // recentChanges (the glow) + editSummary (the toast) lifecycles. The
+  // regen delta also feeds the tracker: one row per element (blocks added
+  // / edited / removed, arrows linked / unlinked). Edited blocks there
+  // come from the POST-regen file mapping (typed-chat edits); no-regen
+  // card edits are recorded from the option-executed subscriber instead.
   const { recentChanges, setRecentChanges } = useRecentChanges({
     state,
     preRegenSnapshotRef,
+    onDelta: recorder.recordDelta,
   });
   const { editSummary, setEditSummary } = useEditSummary();
 
@@ -238,19 +283,51 @@ function DiagramCanvasInner({
   useEffect(() => {
     const labels = editSummary?.blocks;
     if (!labels || labels.length === 0) return;
-    const blocks = state.kind === "ready" ? state.schema.blocks : [];
-    const chips = labels.map((label) => {
-      const cat = blocks.find((b) => b.label === label)?.category;
-      return { label, accent: categoryStyle(cat)?.accent ?? "#978B77" };
-    });
+    // Resolve each label to its id + category. On the typed-chat REGEN path
+    // this effect runs while `state` is momentarily "idle" (the settle effect
+    // sets editSummary and state=idle in the same commit), so state.schema is
+    // empty here; fall back to the pre-regen snapshot's blockMeta so the chip
+    // colours AND the trace-back ids still resolve (otherwise the "edited" row
+    // would be grey and click-dead). The no-regen card path keeps state ready,
+    // so the live schema wins there.
+    const readyBlocks = state.kind === "ready" ? state.schema.blocks : [];
+    const snapMeta = preRegenSnapshotRef.current?.blockMeta;
+    const resolve = (
+      label: string,
+    ): { id?: string; category?: BlockCategory } => {
+      const rb = readyBlocks.find((b) => b.label === label);
+      if (rb) return { id: rb.id, category: rb.category };
+      if (snapMeta) {
+        for (const [id, m] of snapMeta) {
+          if (m.label === label) return { id, category: m.category };
+        }
+      }
+      return {};
+    };
+    const resolved = labels.map((label) => ({ label, ...resolve(label) }));
+    const chips = resolved.map((r) => blockChip(r.label, r.category));
     const seq = chatMessages.length
       ? chatMessages[chatMessages.length - 1]._seq
       : 0;
     pushChatActivity({
       id: `feat:${seq}:${labels.join("|")}`,
       afterSeq: seq,
-      node: <DiagramActionEntry verb="Updated the diagram" chips={chips} />,
+      node: (
+        <DiagramActionEntry
+          verb="Updated the diagram"
+          chips={chips}
+          // The dropped-connection notice used to live on the floating
+          // "Just edited" card; that card duplicated the chat's closing
+          // message and was removed, so the notice rides here instead.
+          note={editSummary?.note}
+        />
+      ),
     });
+    // NOTE: the tracker's "edited" row is NOT recorded here. Card edits (block
+    // "..." / bubble) are recorded immediately from the known target in the
+    // option-executed subscriber above; typed-chat edits come from the
+    // post-regen delta (useRecentChanges). This effect only pushes the chat
+    // "Updated the diagram" chip, so it never double-counts.
     // Read state / chatMessages from the render where editSummary settled
     // (both are final by then); re-running on their later changes would
     // mis-tag the record to a newer turn.
@@ -261,6 +338,22 @@ function DiagramCanvasInner({
   // delete_block) emits "diagram-op"; apply it to the current schema,
   // matched best-effort by the block's displayed label.
   useDiagramBusSubscribe("diagram-op", (detail) => {
+    // Record the op in the tracker (in diagram terms) before applying it.
+    // Resolve the target the same way the schema update below does, off the
+    // current render's state (kept fresh by useDiagramBusSubscribe).
+    if (state.kind === "ready") {
+      const norm = detail.block.trim().toLowerCase();
+      const target =
+        state.schema.blocks.find((b) => b.label.toLowerCase() === norm) ??
+        state.schema.blocks.find((b) => b.label.toLowerCase().includes(norm));
+      if (target) {
+        if (detail.op === "recolor") {
+          recorder.recordRecolor(target, detail.category);
+        } else {
+          recorder.recordRemove(target);
+        }
+      }
+    }
     setState((prev) => {
       if (prev.kind !== "ready") return prev;
       const norm = detail.block.trim().toLowerCase();
@@ -311,11 +404,54 @@ function DiagramCanvasInner({
     new Set(),
   );
   useDiagramBusSubscribe("option-executed", (detail) => {
-    if (detail?.target.kind !== "block") return;
+    if (!detail) return;
+    // Card-driven NEW blocks settle locally (no regen), so the regen delta
+    // never sees them. Record the "added" here, when the user commits the
+    // suggestion, keyed by the pending placeholder that is about to become
+    // the real block. (Edited blocks still come from editSummary; card arrows
+    // are a separate follow-up.)
+    if (detail.target.kind === "new-block") {
+      // Match on the id prefix only, never the placeholder's label text
+      // (a stale label literal here silently lost the block association).
+      const placeholder =
+        state.kind === "ready"
+          ? state.schema.blocks.find(
+              (b) => b.pending && b.id.startsWith("__pending_new_"),
+            )
+          : undefined;
+      recorder.recordNewBlockAdd(placeholder, detail.option.title);
+      return;
+    }
+    // A user-drawn arrow the user then committed. Recorded here, at the
+    // commit, for the same reason "added" is: it is the one moment we know
+    // both endpoints, and it does not depend on the settle delta. ONLY a
+    // block_level choice keeps the arrow at settle; detail / none run the
+    // edit but the line itself is dropped (with a toast note saying so),
+    // and recording those would leave a "linked" row in the history for a
+    // connection the canvas never kept.
+    if (detail.target.kind === "arrow") {
+      if (detail.option.kind !== "block_level") return;
+      const { from, to } = detail.target;
+      const blocks = state.kind === "ready" ? state.schema.blocks : [];
+      recorder.recordLink(blocks, from, to);
+      return;
+    }
+    if (detail.target.kind !== "block") return;
     const id = detail.target.id;
     setCardEditBlockIds((prev) =>
       prev.has(id) ? prev : new Set(prev).add(id),
     );
+    // Record the edit in the tracker NOW, from the block the user explicitly
+    // targeted (block "..." action or a bubble edit). Reliable + immediate,
+    // like "added": it no longer waits for the settle effect or depends on
+    // the edited file mapping back to this block's provenance, which is what
+    // kept dropping card edits (e.g. a scraper edit whose file the block's
+    // provenance didn't list). Typed-chat edits still come from the delta.
+    const block =
+      state.kind === "ready"
+        ? state.schema.blocks.find((b) => b.id === id)
+        : undefined;
+    if (block) recorder.recordEdit(block);
   });
   const prevChatRunningRef = useRef(chatRunning);
   useEffect(() => {
@@ -333,8 +469,19 @@ function DiagramCanvasInner({
   }, [fileEditingBlockIds, cardEditBlockIds]);
 
   // Click-a-block-to-expand-bubbles state. Bubbles are derived from the
-  // block's provenance.functions and rendered as fan-laid ReactFlow
-  // nodes; viewport pans/zooms to the cluster and restores on collapse.
+  // block's capabilities (else provenance.functions) and rendered as
+  // fan-laid ReactFlow nodes; viewport pans/zooms to the cluster and
+  // restores on collapse. PROMOTED blocks are merged in: they live in
+  // their own state slot (not state.schema), and feeding only the base
+  // schema made every promoted block silently un-drillable while its
+  // card still advertised its feature count.
+  const bubbleSourceBlocks = useMemo(
+    () =>
+      state.kind === "ready"
+        ? [...state.schema.blocks, ...promoted.blocks]
+        : EMPTY_BLOCKS,
+    [state, promoted],
+  );
   const {
     expandedBlockId,
     bubbleNodes,
@@ -343,7 +490,7 @@ function DiagramCanvasInner({
     clear: clearBubbles,
   } = useBubbleFocus({
     projectKey,
-    blocks: state.kind === "ready" ? state.schema.blocks : [],
+    blocks: bubbleSourceBlocks,
     nodes,
   });
 
@@ -361,12 +508,25 @@ function DiagramCanvasInner({
   // keeps only its two endpoint blocks (and, below, its one arrow).
   const lens = connection.lens;
   const renderedNodes = useMemo<Node<BlockNodeData>[]>(() => {
+    const tracedIds =
+      tracedStep && tracedStep.blockIds.length > 0
+        ? new Set(tracedStep.blockIds)
+        : null;
+    // Gold ring drawn around the block(s) of the tracker step being traced
+    // back. Deliberately a different colour from the blue "just edited" glow
+    // so "I'm inspecting history" reads apart from "this just changed".
+    // The first shadow is a canvas-coloured gap slot: it separates the gold
+    // from the block's own category border, so the two never fuse into one
+    // muddy khaki band on tinted blocks.
+    const TRACE_RING =
+      "0 0 0 2px #FAFAF9, 0 0 0 5px #B0975A, 0 0 0 9px rgba(176,151,90,0.22)";
     const base = nodes.map((n) => {
       const moved = borrowOffsets.get(n.id);
       const dimByFan = expandedBlockId !== null && n.id !== expandedBlockId;
       const dimByLens =
         lens !== null && n.id !== lens.from && n.id !== lens.to;
       const dim = dimByFan || dimByLens;
+      const traced = tracedIds?.has(n.id) ?? false;
       // Resolve this block's fill + accent through the active color
       // scheme. Done here (not at layout time) so switching schemes
       // recolors without re-running layout, preserving spatial memory.
@@ -386,12 +546,16 @@ function DiagramCanvasInner({
         // leave the description open after the bubbles collapse.
         isExpanded: n.id === expandedBlockId,
       };
-      if (!moved && !dim) return { ...n, data };
-      return {
-        ...n,
-        data,
-        position: moved ?? n.position,
-        style: dim
+      if (!moved && !dim && !traced) return { ...n, data };
+      // Trace ring wins over dim so a traced block is always legible.
+      const style = traced
+        ? {
+            ...n.style,
+            boxShadow: TRACE_RING,
+            borderRadius: 12,
+            transition: "box-shadow 200ms ease",
+          }
+        : dim
           ? {
               ...n.style,
               opacity: 0.16,
@@ -401,13 +565,21 @@ function DiagramCanvasInner({
               // it, instead of being swallowed by a faded block.
               pointerEvents: "none" as const,
             }
-          : n.style,
-      };
+          : n.style;
+      return { ...n, data, position: moved ?? n.position, style };
     });
     return bubbleNodes.length === 0
       ? base
       : [...base, ...(bubbleNodes as unknown as Node<BlockNodeData>[])];
-  }, [nodes, bubbleNodes, borrowOffsets, expandedBlockId, lens, activeScheme]);
+  }, [
+    nodes,
+    bubbleNodes,
+    borrowOffsets,
+    expandedBlockId,
+    lens,
+    activeScheme,
+    tracedStep,
+  ]);
 
   // Global obstacle-avoiding routing with lane separation (see hook).
   const edgesWithRoutes = useEdgeRouting(nodes, edges);
@@ -442,6 +614,8 @@ function DiagramCanvasInner({
     setPromoted({ blocks: [], arrows: [] });
     setUserGoal(null);
     setSurveyIntroDone(false);
+    setTracedStep(null);
+    setTrackerOpen(false);
     userPositionsRef.current.clear();
   }, [projectKey]);
 
@@ -488,6 +662,17 @@ function DiagramCanvasInner({
     bus,
     dismissRecentEdit,
     setSelectedId,
+    // Arrows Claude added during a turn, already resolved to block ids.
+    // Deduped by direction so a re-report can never double-count. Blocks are
+    // read from the CURRENT render's schema (adding arrows does not change
+    // them), so this stays a plain read with no state-updater side effects.
+    onArrowsLinked: useCallback(
+      (links: Array<{ from: string; to: string; label: string }>) => {
+        const blocks = state.kind === "ready" ? state.schema.blocks : [];
+        for (const l of links) recorder.recordLink(blocks, l.from, l.to);
+      },
+      [state, recorder],
+    ),
   });
 
   const onNodeClick = useCallback(
@@ -507,24 +692,14 @@ function DiagramCanvasInner({
     [toggleBubbleBlock, bubbleEdit],
   );
 
-  // Detect double-click on the empty canvas (no built-in handler in
-  // React Flow for this on the pane). Two onPaneClick events within
-  // 300ms => add-new-block. A single click still deselects as before.
-  const lastPaneClickRef = useRef(0);
+  // A pane click is inspection only: deselect, collapse bubbles, end a trace.
+  // Double-clicking empty canvas used to add a new block; that shortcut was
+  // removed because it fired by accident. Add block via the labelled button.
   const onPaneClick = useCallback(() => {
-    const now = Date.now();
-    if (now - lastPaneClickRef.current < 300) {
-      lastPaneClickRef.current = 0;
-      visualEdit.handleAddNewBlock();
-      return;
-    }
-    lastPaneClickRef.current = now;
-    // Deselect / collapse bubbles is inspection, not a next edit, so keep
-    // the recent-change glow (add-new-block on double-click dismisses via
-    // its own handler).
     setSelectedId(null);
     clearBubbles();
-  }, [visualEdit, clearBubbles]);
+    clearTrace();
+  }, [clearBubbles, clearTrace]);
 
   // Diff-on-ready glow handled by useRecentChanges above.
   // Settle effect (arrow outcomes, regen, edit-summary) handled below.
@@ -578,8 +753,20 @@ function DiagramCanvasInner({
   // Camera pan to focused base block(s) when a focus delta arrives.
   useViewportFocusFit({ view, focused });
 
+  // Camera pan to the block(s) of the tracker step the user is tracing back.
+  useTraceFit(tracedStep);
+
   // Auto-fit during streaming + final fit + ResizeObserver-driven refit.
-  const canvasContainerRef = useCanvasFit({ state, view, focused, nodes });
+  const canvasContainerRef = useCanvasFit({
+    state,
+    view,
+    focused,
+    nodes,
+    // While a connection lens is opening or open, canvas-wide auto-fits
+    // must not fire: they stomp the lens's own framing and the note then
+    // places itself in a wrongly-zoomed view.
+    suspend: connection.active,
+  });
 
   // The panel is open for the WHOLE of focus mode, not just once there's
   // content. Switching into adaptive focus animates it in immediately; with
@@ -590,19 +777,21 @@ function DiagramCanvasInner({
   const panelOpen = view === "focus";
 
   return (
-    <div className="relative flex h-full w-full bg-[#FAFAFA]">
+    <div className="relative flex h-full w-full bg-[#FAFAF9]">
       <div
         ref={canvasContainerRef}
         className={`relative h-full ${panelOpen ? "flex-1 min-w-0" : "w-full"}`}
       >
-        {/* The regen "fog" dims only the diagram CONTENT (nodes, edges,
-         *  labels) so the reader sees it's stale/rebuilding. The overlay
-         *  controls below (focus toggle, legend, add button) sit outside this
-         *  layer and stay crisp: fogging a control you might click reads as a
-         *  glitch, not as feedback. */}
+        {/* The regen "fog" dims the diagram CONTENT while it's being REBUILT
+         *  (an edit-driven regen). It is deliberately NOT tied to `regenerating`
+         *  (the adaptive-focus round): a focus round only grows the SIDE PANEL,
+         *  the main canvas is stable, so fogging it there needlessly dims
+         *  everything (including a block the user just promoted). The side
+         *  panel's own loading state signals the focus round instead. Overlay
+         *  controls sit outside this layer and stay crisp. */}
         <div
           className={`absolute inset-0 transition-opacity duration-300 ${
-            regenerating || editRegenIds.size > 0 ? "opacity-60" : "opacity-100"
+            editRegenIds.size > 0 ? "opacity-60" : "opacity-100"
           }`}
         >
           <ReactFlow
@@ -626,7 +815,7 @@ function DiagramCanvasInner({
             nodesFocusable={false}
             elementsSelectable={false}
           >
-            <Background color="#E0E0E0" gap={16} />
+            <Background color="#E4E3E0" gap={16} />
             <Controls
               showInteractive={false}
               className="!border-[#D4D4D4] !bg-white"
@@ -639,6 +828,35 @@ function DiagramCanvasInner({
           nodeCount={nodes.length}
           onRetry={() => setRetryNonce((n) => n + 1)}
         />
+        {/* Tracker tray: a dropdown anchored (fixed) beneath the Tracker
+         *  header button via trackerBtnRef, so it reads as belonging to that
+         *  button rather than a stray floating panel. Clicking a row
+         *  trace-highlights that step's block(s) via tracedStep. */}
+        {state.kind === "ready" && trackerOpen && (
+          <TrackerTray
+            entries={tracker.entries}
+            selectedId={tracker.selectedId}
+            anchorRef={trackerBtnRef}
+            onSelect={(e) => {
+              // Re-clicking the selected row toggles the trace OFF (clears the
+              // ring + zooms back out via useTraceFit); a different row moves
+              // the trace to that block.
+              if (tracker.selectedId === e.id) {
+                trackerSelect(null);
+                setTracedStep(null);
+              } else {
+                trackerSelect(e.id);
+                setTracedStep({ blockIds: e.blockIds, bubble: e.bubble });
+              }
+            }}
+            onClose={() => {
+              // Closing the tray ends the trace-back too, so no orphan ring
+              // lingers on the canvas with no tray to explain it.
+              setTrackerOpen(false);
+              clearTrace();
+            }}
+          />
+        )}
         {/* Adaptive-focus welcome / loading / streaming count all live INSIDE
          *  the side panel (DiagramFocusPanel), which is open for the whole of
          *  focus mode, so nothing floats over the canvas during a focus round. */}
@@ -653,6 +871,13 @@ function DiagramCanvasInner({
         )}
         {visualEdit.intentGate && state.kind === "ready" && (
           <IntentGate
+            key={
+              visualEdit.intentGate.target.kind === "arrow"
+                ? `arrow:${visualEdit.intentGate.target.from}:${visualEdit.intentGate.target.to}`
+                : visualEdit.intentGate.target.kind === "block"
+                  ? `block:${visualEdit.intentGate.target.id}`
+                  : "module"
+            }
             target={visualEdit.intentGate.target}
             blocks={state.schema.blocks}
             onAskSuggestions={visualEdit.handleIntentGateAskSuggestions}
@@ -670,6 +895,23 @@ function DiagramCanvasInner({
               onEdit={intentCtl.openEditor}
             />,
             headerSlot,
+          )}
+        {/* Interaction-tracker button in the header-right slot; the tray it
+         *  opens floats over the canvas' top-right corner (rendered below). */}
+        {state.kind === "ready" &&
+          headerRightSlot &&
+          createPortal(
+            <TrackerButton
+              ref={trackerBtnRef}
+              count={tracker.entries.length}
+              open={trackerOpen}
+              onToggle={() => {
+                // Toggling the tray shut also ends the trace-back.
+                if (trackerOpen) clearTrace();
+                setTrackerOpen((o) => !o);
+              }}
+            />,
+            headerRightSlot,
           )}
         {userGoal === null &&
           files.length > 0 &&
@@ -690,12 +932,6 @@ function DiagramCanvasInner({
             onCancel={intentCtl.closeEditor}
           />
         )}
-        {editSummary && (
-          <EditSummaryToast
-            summary={editSummary}
-            onDismiss={() => setEditSummary(null)}
-          />
-        )}
         {state.kind === "ready" && view === "overview" && (
           <ColorSchemeLegend
             schemes={color.schemes}
@@ -713,7 +949,7 @@ function DiagramCanvasInner({
                 <button
                   type="button"
                   onClick={visualEdit.handleAddNewBlock}
-                  title="Add a new module (or double-click the empty canvas)"
+                  title="Add a new block"
                   className="flex items-center gap-1.5 rounded-full border border-[#78716C]/20 bg-white/95 py-2 pl-3 pr-3.5 text-[12px] font-medium text-[#484848] shadow-lg backdrop-blur-[2px] transition-colors hover:bg-white"
                 >
                   <Plus className="h-4 w-4 text-[#78716C]" strokeWidth={2} />
@@ -728,11 +964,13 @@ function DiagramCanvasInner({
             blocks={state.schema.blocks}
             files={files}
             detail={bubbleEdit.detail}
+            settled={bubbleEdit.settled}
             onCloseDetail={bubbleEdit.closeDetail}
-            onConfirmDetail={(blockId, instruction) => {
+            onConfirmDetail={(blockId, instruction, summary) => {
               visualEdit.dispatchExecuteDirect(
                 { kind: "block", id: blockId },
                 instruction,
+                summary,
               );
               bubbleEdit.closeDetail();
               clearBubbles();
@@ -766,8 +1004,6 @@ function DiagramCanvasInner({
                 blocks={blocks}
                 files={files}
                 onClose={connection.close}
-                offset={connection.cardOffset}
-                onOffsetChange={connection.setCardOffset}
                 fromColor={accentOf(ln.from)}
                 toColor={accentOf(ln.to)}
               />
@@ -828,6 +1064,7 @@ function DiagramCanvasInner({
                 ...b,
                 parent: null,
                 category: b.category ?? parentBlock?.category,
+                promotedDetail: true,
               };
               const alreadyLinked =
                 !parentBlock ||
@@ -848,6 +1085,28 @@ function DiagramCanvasInner({
                 arrows: [...prev.arrows, ...newArrows, ...parentArrow],
               };
             });
+            // The blue "just changed" mark always shows the LATEST action.
+            // A promote IS the user's newest diagram change, so it takes the
+            // mark over; leaving the previous action's blocks glowing while
+            // the newly promoted block arrives unmarked read as the
+            // highlight being stuck on stale targets.
+            const promotedParentId =
+              b.parent && state.schema.blocks.some((x) => x.id === b.parent)
+                ? b.parent
+                : null;
+            setRecentChanges({
+              blockIds: new Set([b.id]),
+              arrowKeys: promotedParentId
+                ? new Set([`${promotedParentId}->${b.id}`])
+                : new Set(),
+            });
+            // Track the promote (in diagram terms) so it can be traced back.
+            const cat =
+              b.category ??
+              (b.parent
+                ? state.schema.blocks.find((x) => x.id === b.parent)?.category
+                : undefined);
+            recorder.recordPromote(b, cat);
           }}
           onUnpromote={(b) => {
             setPromoted((prev) => ({
@@ -856,6 +1115,13 @@ function DiagramCanvasInner({
                 (a) => a.from !== b.id && a.to !== b.id,
               ),
             }));
+            // The removed block cannot glow (it is gone), and the previous
+            // action's glow is stale by now, so the mark simply clears.
+            dismissRecentEdit();
+            // Taking a promoted detail back off the canvas is a removal from
+            // the diagram, so record it. Otherwise the tracker keeps showing a
+            // stale "promoted" row for a block that is no longer there.
+            recorder.recordRemove(b);
           }}
         />
       )}

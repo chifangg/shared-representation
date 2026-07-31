@@ -211,10 +211,10 @@ export function composeSuggestionsRound1Prompt(
   }
   const summary =
     target.kind === "arrow"
-      ? `Suggestions for connection`
+      ? `Suggestions for this connection`
       : target.kind === "block"
-        ? `Suggestions for block action`
-        : `Suggestions for new module`;
+        ? `Suggestions to modify`
+        : `Suggestions for a new block`;
   return [
     `${VISUAL_EDIT_SENTINEL_PREFIX}${summary}${VISUAL_EDIT_SENTINEL_SUFFIX}`,
     buildTargetSentinel(target),

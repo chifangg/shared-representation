@@ -159,6 +159,11 @@ export function useChatSettleEffect({
       // grey even though we just settled stuff.
       const settledBlockIds = new Set<string>();
       const settledArrowKeys = new Set<string>();
+      // Ids of placeholder blocks finalized into real new blocks this turn.
+      // They start with empty provenance/capabilities, so they get queued for
+      // a capability refresh (against the files Claude just scaffolded) below,
+      // otherwise the new block would open with no bubbles.
+      const newBlockIds = new Set<string>();
       // User-drawn arrows that got dropped this turn because the chosen
       // outcome was NOT a block-level relationship. Surfaced as a toast
       // note so the line doesn't just silently vanish.
@@ -236,7 +241,7 @@ export function useChatSettleEffect({
         // wipe + re-layout would lose their spatial memory of where
         // existing blocks sit. For new-block specifically: update the
         // placeholder so it shows the chosen module title instead of
-        // staying as "New module…".
+        // staying as "New block…".
         if (hadBlockOrNewBlockExecute) {
           const newBlockOptions = blockOrNewBlockEntries
             .filter((e) => e.target.kind === "new-block")
@@ -251,6 +256,7 @@ export function useChatSettleEffect({
               const opt = newBlockOptions[optIdx];
               if (!opt) return b;
               settledBlockIds.add(b.id);
+              newBlockIds.add(b.id);
               optIdx++;
               return {
                 ...b,
@@ -315,6 +321,22 @@ export function useChatSettleEffect({
                 .map((a) => `${a.from}->${a.to}`),
             ),
             editedBlockIds: new Set(editedBlockIds),
+            // Carry label/category/files so a block that vanishes in the
+            // regen can still be named in the tracker's delta, and a re-keyed
+            // block can be recognised by its files (see the delta coalescing).
+            blockMeta: new Map(
+              state.schema.blocks
+                .filter((b) => !b.pending)
+                .map((b) => [
+                  b.id,
+                  {
+                    label: b.label,
+                    category: b.category,
+                    files: b.provenance?.files ?? [],
+                  },
+                ]),
+            ),
+            editedFiles: Array.from(editedFiles),
           };
         }
         // Keep the old diagram visible through the rebuild and pulse the
@@ -344,6 +366,12 @@ export function useChatSettleEffect({
             targets.set(entry.target.id, Array.from(editedFiles));
           }
         }
+        // A freshly-created block has empty provenance, so hand it the files
+        // Claude just scaffolded: the refresh derives its capabilities from
+        // them (and folds them into its provenance) so it opens with bubbles.
+        for (const id of newBlockIds) {
+          targets.set(id, Array.from(editedFiles));
+        }
         for (const id of editedBlockIds) {
           if (!targets.has(id)) targets.set(id, []);
         }
@@ -372,16 +400,37 @@ export function useChatSettleEffect({
       // "here's what just changed" without scrolling the chat. Fires when
       // files changed OR a user connection was dropped (so the note shows).
       if (editedFiles.size > 0 || droppedNote) {
-        const fullText = textChunks.join("\n");
-        const stripped = fullText
-          .replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, "")
-          .trim();
-        const firstParagraph = stripped.split(/\n\n+/)[0] ?? "";
+        // The LAST text chunk, not the first: a turn opens with play-by-play
+        // narration ("Let me read the ...") and closes with Claude's actual
+        // summary of what changed. Leading with the narration made the toast
+        // read as noise. Fences are stripped first, since the closing
+        // message often ends with the added_arrows JSON block.
+        const stripFences = (s: string) =>
+          s.replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, "").trim();
+        let summaryText = "";
+        for (let i = textChunks.length - 1; i >= 0; i--) {
+          const t = stripFences(textChunks[i]);
+          if (t) {
+            summaryText = t;
+            break;
+          }
+        }
         // Labels of the blocks whose code changed, so the user knows which
         // block now reflects the edit (it may not be the one they clicked).
+        // Include the block(s) the user explicitly targeted via a card /
+        // bubble edit, not only the file-mapped ones: a block's provenance
+        // may not list the file Claude actually edited, so the file mapping
+        // alone can miss the very block the user pointed at. Drives the
+        // "Updated the diagram" chip, the toast, AND the tracker's "edited".
+        const changedBlockIds = new Set(editedBlockIds);
+        for (const entry of blockOrNewBlockEntries) {
+          if (entry.target.kind === "block") {
+            changedBlockIds.add(entry.target.id);
+          }
+        }
         const changedBlockLabels =
           state.kind === "ready"
-            ? Array.from(editedBlockIds)
+            ? Array.from(changedBlockIds)
                 .map(
                   (id) =>
                     state.schema.blocks.find((b) => b.id === id)?.label,
@@ -390,10 +439,12 @@ export function useChatSettleEffect({
             : [];
         setEditSummary({
           files: Array.from(editedFiles),
+          // Roomier cap than the old 220: the closing summary is the part
+          // worth reading, and the card scrolls anyway.
           text:
-            firstParagraph.length > 220
-              ? `${firstParagraph.slice(0, 217)}…`
-              : firstParagraph,
+            summaryText.length > 420
+              ? `${summaryText.slice(0, 417)}…`
+              : summaryText,
           blocks: changedBlockLabels.length > 0 ? changedBlockLabels : undefined,
           note: droppedNote,
         });

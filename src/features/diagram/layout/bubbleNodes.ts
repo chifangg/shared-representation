@@ -150,15 +150,20 @@ function fanGeometry(
  * (the canvas is wider than tall), so the bottom/top bubbles fall off
  * screen. Framing the whole cluster fixes that.
  */
-export function clusterFocusCenter(args: {
+export function clusterFocusBounds(args: {
   block: DiagramBlock;
   blockPosition: { x: number; y: number };
   otherBlocks: Array<{ x: number; y: number }>;
-}): { x: number; y: number } {
+}): { x: number; y: number; width: number; height: number } {
   const { block, blockPosition, otherBlocks } = args;
   const items = bubbleItemsForBlock(block);
   if (items.length === 0) {
-    return { x: blockPosition.x + NODE_W / 2, y: blockPosition.y + NODE_H / 2 };
+    return {
+      x: blockPosition.x,
+      y: blockPosition.y,
+      width: NODE_W,
+      height: NODE_H,
+    };
   }
   const { positions } = fanGeometry(blockPosition, items.length, otherBlocks);
   let minX = blockPosition.x;
@@ -171,7 +176,11 @@ export function clusterFocusCenter(args: {
     minY = Math.min(minY, p.y - BUBBLE_HALF_SIZE);
     maxY = Math.max(maxY, p.y + BUBBLE_HALF_SIZE);
   }
-  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  // Return the bounding RECT of the block + fan (not just the center) so the
+  // caller can fitBounds() it: the zoom then adapts to how many bubbles there
+  // are, instead of a fixed zoom that lands too close once a bubble edit adds
+  // more of them.
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
 export function buildBubbleAndSectorNodes(args: {

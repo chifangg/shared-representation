@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -50,6 +51,7 @@ export function useVisualEditHandlers({
   bus,
   dismissRecentEdit,
   setSelectedId,
+  onArrowsLinked,
 }: {
   state: FetchState;
   setState: Dispatch<SetStateAction<FetchState>>;
@@ -59,6 +61,14 @@ export function useVisualEditHandlers({
    *  user-action handler so the highlight survives until they act. */
   dismissRecentEdit: () => void;
   setSelectedId: Dispatch<SetStateAction<string | null>>;
+  /** Reports arrows Claude added, already resolved to block IDS, so the
+   *  canvas can record them in the interaction tracker. Reported from here
+   *  rather than from an "arrows-added" subscriber on the canvas because
+   *  the label to id resolution (with its fuzzy fallback) lives here, and
+   *  duplicating it would let the two disagree. */
+  onArrowsLinked?: (
+    links: Array<{ from: string; to: string; label: string }>,
+  ) => void;
 }) {
   // Round-1 options Claude returned for the most-recent edit target
   // (arrow, block, or new-block). Set by the "options-ready" subscriber
@@ -76,7 +86,24 @@ export function useVisualEditHandlers({
   // time this state is set.
   const [intentGate, setIntentGate] = useState<{
     target: EditTarget;
+    /** For the add-module gate: the id of the dashed placeholder block it was
+     *  opened against. The gate lives only as long as that placeholder does, so
+     *  a regeneration (which wipes the placeholder) also closes the gate. */
+    pendingBlockId?: string;
   } | null>(null);
+
+  // Close a stale add-module gate once its placeholder is gone. A regeneration
+  // replaces the whole schema and wipes the pending placeholder; without this
+  // the gate (which briefly hides while the diagram is not "ready") would pop
+  // back over the fresh diagram, reading as if it opened itself.
+  useLayoutEffect(() => {
+    if (!intentGate?.pendingBlockId) return;
+    if (state.kind !== "ready") return;
+    const stillThere = state.schema.blocks.some(
+      (b) => b.id === intentGate.pendingBlockId,
+    );
+    if (!stillThere) setIntentGate(null);
+  }, [state, intentGate]);
 
   /**
    * User asked to add a new module (clicked "+" or double-clicked the
@@ -96,7 +123,7 @@ export function useVisualEditHandlers({
       if (prev.kind !== "ready") return prev;
       const placeholder: DiagramBlock = {
         id: placeholderId,
-        label: "New module…",
+        label: "New block…",
         caption: "Waiting for you to describe it or pick a suggestion.",
         parent: null,
         provenance: { files: [], functions: [] },
@@ -110,7 +137,7 @@ export function useVisualEditHandlers({
         },
       };
     });
-    setIntentGate({ target: { kind: "new-block" } });
+    setIntentGate({ target: { kind: "new-block" }, pendingBlockId: placeholderId });
   }, [state, dismissRecentEdit, setState]);
 
   /**
@@ -170,6 +197,41 @@ export function useVisualEditHandlers({
   );
 
   /**
+   * Flip a user-drawn arrow's pending stage from "intent" to "claude"
+   * the moment its edit is dispatched. This is the transition the
+   * DiagramArrow type documents but which was never wired: "intent"
+   * arrows are kept OUT of dagre ranking (so the open popover doesn't
+   * get janked off its midpoint), while "claude" arrows DO rank. Making
+   * the handoff real means that as soon as the user commits, the arrow
+   * starts counting for layout, and a new block it connects slides out
+   * of the island band into the spine while Claude works, instead of
+   * staying stranded at the bottom all turn.
+   */
+  const markArrowHandedOff = useCallback(
+    (target: EditTarget) => {
+      if (target.kind !== "arrow") return;
+      const { from, to } = target;
+      setState((prev) => {
+        if (prev.kind !== "ready") return prev;
+        let changed = false;
+        const arrows = prev.schema.arrows.map((a) => {
+          if (a.from === from && a.to === to && a.pending === "intent") {
+            changed = true;
+            return { ...a, pending: "claude" as const };
+          }
+          return a;
+        });
+        if (!changed) return prev;
+        return {
+          kind: "ready",
+          schema: { blocks: prev.schema.blocks, arrows },
+        };
+      });
+    },
+    [setState],
+  );
+
+  /**
    * "Describe yourself" path: skip round-1 and go straight to a
    * round-2 execute, packing the user's free-text description as the
    * intent. Also fires "option-executed" with a synthesized option
@@ -178,14 +240,22 @@ export function useVisualEditHandlers({
    * let auto-regen pick up real outcomes).
    */
   const dispatchExecuteDirect = useCallback(
-    (target: EditTarget, userText: string) => {
+    (target: EditTarget, userText: string, summaryOverride?: string) => {
       if (state.kind !== "ready") return;
       const trimmed = userText.trim();
+      // The chat-bubble summary. Callers that wrap the user's words in
+      // targeting boilerplate (the bubble-edit card) pass a concise override
+      // so the summary leads with the actual change, not "In the block X,
+      // change the function ...". Falls back to a truncated userText.
+      const rawSummary = (summaryOverride ?? trimmed).trim();
+      const summaryTitle =
+        rawSummary.length > 60 ? `${rawSummary.slice(0, 57)}…` : rawSummary;
       const synthOption: ConnectionOption = {
-        title: trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed,
+        title: summaryTitle,
         detail: "User-described change.",
         kind: "detail",
       };
+      markArrowHandedOff(target);
       bus.emit("option-executed", { target, option: synthOption });
       bus.emit("visual-edit", {
         prompt: composeExecuteDirectPrompt(
@@ -198,14 +268,16 @@ export function useVisualEditHandlers({
         kind: "execute-direct",
       });
     },
-    [state, files, bus],
+    [state, files, bus, markArrowHandedOff],
   );
 
   /**
-   * User dropped a new arrow. Add it to the schema with pending="claude"
-   * (marching-ants) AND open the intent gate so they can pick whether
-   * to describe the change themselves or have Claude suggest options.
-   * No chat dispatch until the gate closes.
+   * User dropped a new arrow. Add it to the schema with pending="intent"
+   * (marching-ants, excluded from ranking while the gate is open) AND
+   * open the intent gate so they can pick whether to describe the change
+   * themselves or have Claude suggest options. No chat dispatch until
+   * the gate closes; the execute paths then hand the arrow off to
+   * pending="claude" via markArrowHandedOff.
    */
   const handleAddConnection = useCallback(
     (connection: Connection) => {
@@ -275,11 +347,16 @@ export function useVisualEditHandlers({
 
     // For new-block: rename the next unclaimed placeholder eagerly so
     // any arrows-added Claude emits during this turn can resolve its
-    // label. Without this, the placeholder stays "New module…" until
-    // the chatRunning settle runs (after Claude is fully done), so any
-    // mid-stream arrows-added → resolveId silently drops every arrow
-    // pointing at the new block. We keep `pending: true` so the dashed
-    // border still signals "Claude is implementing this".
+    // label. Without this, the placeholder keeps its generic waiting
+    // label until the chatRunning settle runs (after Claude is fully
+    // done), so any mid-stream arrows-added → resolveId silently drops
+    // every arrow pointing at the new block. We keep `pending: true` so
+    // the dashed border still signals "Claude is implementing this".
+    //
+    // Identify the placeholder by its id prefix, NEVER by its label
+    // text: a previous rename of that copy left this check comparing
+    // against a stale literal, so nothing ever matched and every new
+    // block landed with no edges at all.
     if (detail.target.kind === "new-block") {
       setState((prev) => {
         if (prev.kind !== "ready") return prev;
@@ -287,7 +364,6 @@ export function useVisualEditHandlers({
         const nextBlocks = prev.schema.blocks.map((b) => {
           if (claimed) return b;
           if (!b.pending || !b.id.startsWith("__pending_new_")) return b;
-          if (b.label !== "New module…") return b;
           claimed = true;
           return {
             ...b,
@@ -325,80 +401,88 @@ export function useVisualEditHandlers({
    * render with marching-ants until the chatRunning settle. Duplicates
    * (same from→to direction) and unresolved labels are silently
    * dropped — Claude sometimes hallucinates labels.
+   *
+   * Resolution runs OUTSIDE the setState updater (the bus keeps this
+   * handler's closure fresh, so `state` is current). An earlier version
+   * filled the `linked` report array inside the updater and read it right
+   * after the setState call; React often defers updaters, so the array was
+   * still empty at the read and Claude's arrows never reached the tracker.
+   * The updater now only re-checks duplicates against `prev` and appends.
    */
   useDiagramBusSubscribe("arrows-added", (detail) => {
     if (!detail || detail.arrows.length === 0) return;
     dlog("recent-debug:arrows-added handler", {
       detailArrows: detail.arrows,
     });
+    if (state.kind !== "ready") return;
+    const blocks = state.schema.blocks;
+    const resolveId = (label: string): string | null => {
+      const lc = label.trim().toLowerCase();
+      const exact = blocks.find((b) => b.label.toLowerCase() === lc);
+      if (exact) return exact.id;
+      // Fuzzy: substring match either way.
+      const fuzzy = blocks.find(
+        (b) =>
+          b.label.toLowerCase().includes(lc) ||
+          lc.includes(b.label.toLowerCase()),
+      );
+      if (!fuzzy) {
+        // Surface mismatches in dev: silently dropping arrows
+        // makes it impossible to tell whether Claude forgot to
+        // emit them vs. emitted wrong labels.
+        dwarn(
+          "diagram",
+          `added_arrows label "${label}" did not match any block. Existing labels:`,
+          blocks.map((b) => b.label),
+        );
+      }
+      return fuzzy?.id ?? null;
+    };
+    const toAdd: DiagramArrow[] = [];
+    for (const a of detail.arrows) {
+      const from = resolveId(a.from);
+      const to = resolveId(a.to);
+      if (!from || !to || from === to) continue;
+      // Skip an arrow if ANY arrow already connects this pair, in
+      // EITHER direction: a same-pair anti-parallel arrow (e.g. the
+      // user drew A->B and Claude proposes B->A) renders as a confusing
+      // "writes / writes" double line. One arrow per pair is enough.
+      const samePair = (x: { from: string; to: string }) =>
+        (x.from === from && x.to === to) || (x.from === to && x.to === from);
+      if (state.schema.arrows.some(samePair)) continue;
+      if (toAdd.some(samePair)) continue;
+      const label = a.label?.trim() || "uses";
+      toAdd.push({ from, to, label, pending: "claude" });
+    }
+    if (toAdd.length === 0) return;
+    dlog("recent-debug:arrows-added applied", {
+      toAdd: toAdd.map((a) => `${a.from}->${a.to}(${a.label})`),
+    });
     setState((prev) => {
       if (prev.kind !== "ready") return prev;
-      const resolveId = (label: string): string | null => {
-        const lc = label.trim().toLowerCase();
-        const exact = prev.schema.blocks.find(
-          (b) => b.label.toLowerCase() === lc,
-        );
-        if (exact) return exact.id;
-        // Fuzzy: substring match either way.
-        const fuzzy = prev.schema.blocks.find(
-          (b) =>
-            b.label.toLowerCase().includes(lc) ||
-            lc.includes(b.label.toLowerCase()),
-        );
-        if (!fuzzy) {
-          // Surface mismatches in dev — silently dropping arrows
-          // makes it impossible to tell whether Claude forgot to
-          // emit them vs. emitted wrong labels.
-          dwarn(
-            "diagram",
-            `added_arrows label "${label}" did not match any block. Existing labels:`,
-            prev.schema.blocks.map((b) => b.label),
-          );
-        }
-        return fuzzy?.id ?? null;
-      };
-      const toAdd: DiagramArrow[] = [];
-      for (const a of detail.arrows) {
-        const from = resolveId(a.from);
-        const to = resolveId(a.to);
-        if (!from || !to || from === to) continue;
-        // Skip an arrow if ANY arrow already connects this pair, in
-        // EITHER direction: a same-pair anti-parallel arrow (e.g. the
-        // user drew A->B and Claude proposes B->A) renders as a confusing
-        // "writes / writes" double line. One arrow per pair is enough.
-        const exists = prev.schema.arrows.some(
-          (x) =>
-            (x.from === from && x.to === to) ||
-            (x.from === to && x.to === from),
-        );
-        if (exists) continue;
-        if (
-          toAdd.some(
+      // Re-check against prev: the closure's snapshot can be one commit
+      // behind (e.g. two arrows-added events landing in the same batch).
+      const fresh = toAdd.filter(
+        (n) =>
+          !prev.schema.arrows.some(
             (x) =>
-              (x.from === from && x.to === to) ||
-              (x.from === to && x.to === from),
-          )
-        )
-          continue;
-        toAdd.push({
-          from,
-          to,
-          label: a.label?.trim() || "uses",
-          pending: "claude",
-        });
-      }
-      if (toAdd.length === 0) return prev;
-      dlog("recent-debug:arrows-added applied", {
-        toAdd: toAdd.map((a) => `${a.from}->${a.to}(${a.label})`),
-      });
+              (x.from === n.from && x.to === n.to) ||
+              (x.from === n.to && x.to === n.from),
+          ),
+      );
+      if (fresh.length === 0) return prev;
       return {
         kind: "ready",
         schema: {
           blocks: prev.schema.blocks,
-          arrows: [...prev.schema.arrows, ...toAdd],
+          arrows: [...prev.schema.arrows, ...fresh],
         },
       };
     });
+    // Report AFTER dispatch, from the precomputed list: the tracker-side
+    // consumer dedupes by pair key, so a rare prev-side drop above can at
+    // worst re-report a pair it has already recorded, never miss one.
+    onArrowsLinked?.(toAdd.map(({ from, to, label }) => ({ from, to, label })));
   });
 
   /**
@@ -413,6 +497,7 @@ export function useVisualEditHandlers({
       if (state.kind !== "ready") return;
       const { target } = pendingOptions;
 
+      markArrowHandedOff(target);
       bus.emit("option-executed", { target, option });
       bus.emit("visual-edit", {
         prompt: composeExecuteOptionPrompt(
@@ -425,7 +510,7 @@ export function useVisualEditHandlers({
       });
       setPendingOptions(null);
     },
-    [pendingOptions, state, files, bus],
+    [pendingOptions, state, files, bus, markArrowHandedOff],
   );
 
   /** Strip any pending arrow / placeholder block tied to the target
@@ -463,12 +548,16 @@ export function useVisualEditHandlers({
   );
 
   /** "Cancel" on the cards overlay: clear the cards + drop any
-   *  on-canvas placeholder tied to the target. */
+   *  on-canvas placeholder tied to the target. Also announces the
+   *  cancellation so the chat's "suggestions ready" chip flips to its
+   *  dismissed state instead of forever advertising options that no
+   *  longer exist. */
   const handleCancelOptions = useCallback(() => {
     if (!pendingOptions) return;
+    bus.emit("options-cancelled", { target: pendingOptions.target });
     removeTargetVisual(pendingOptions.target);
     setPendingOptions(null);
-  }, [pendingOptions, removeTargetVisual]);
+  }, [pendingOptions, removeTargetVisual, bus]);
 
   /** Intent gate: user picked "Ask Claude for suggestions". Fire the
    *  round-1 prompt; the cards UI will land in pendingOptions when

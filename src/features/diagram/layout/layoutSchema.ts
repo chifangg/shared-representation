@@ -66,6 +66,11 @@ const ISLAND_GAP_X = 40;
 const ISLAND_GAP_Y = 40;
 /** Gap between the bottom of the connected spine and the island band. */
 const ISLAND_BAND_GAP = 90;
+/** Left indent of the island band, in flow units. The pane's bottom-left
+ *  corner carries floating chrome (the Add block button and the category
+ *  legend), and a fresh edge-less block used to spawn exactly underneath
+ *  it. Indenting the band keeps that corner clear at typical zoom. */
+const ISLAND_CHROME_INDENT = 320;
 
 export function layoutSchema(
   schema: DiagramSchema,
@@ -101,16 +106,22 @@ export function layoutSchema(
   const blockHeight = (b: DiagramBlock) =>
     b.id === selectedId ? estimateExpandedHeight(b) : NODE_H;
 
-  // Collect the edges dagre ranks on (parent links + settled arrows).
-  // Pending arrows are skipped — adding an in-flight edge can shuffle
-  // nodes the moment the user pulls a new arrow, jarring the popover
-  // off its midpoint. They still render (see edges loop below).
+  // Collect the edges dagre ranks on (parent links + settled arrows +
+  // Claude's in-flight arrows). Only "intent" arrows are skipped: while
+  // the user is still pulling an arrow (popover open), re-ranking would
+  // jar the popover off its midpoint. Once it hands off to Claude
+  // ("claude"), the arrow DOES rank: it is often a brand-new block's only
+  // tie to the graph, and ranking on it slots the block into the spine
+  // during the visibly-in-progress phase instead of leaving it in the
+  // island band all turn and teleporting it up when the turn settles.
+  // The settle pass only clears the pending tag, so the ranking edges
+  // (and therefore positions) do not change again at settle time.
   const dagreEdges: Array<[string, string]> = [];
   for (const b of schema.blocks) {
     if (b.parent && allBlockIds.has(b.parent)) dagreEdges.push([b.parent, b.id]);
   }
   for (const a of schema.arrows) {
-    if (a.pending !== undefined) continue;
+    if (a.pending === "intent") continue;
     if (allBlockIds.has(a.from) && allBlockIds.has(a.to)) {
       dagreEdges.push([a.from, a.to]);
     }
@@ -127,83 +138,22 @@ export function layoutSchema(
     connected.add(to);
   }
 
-  // --- Importance-based re-rooting -------------------------------------
-  // dagre ranks purely by edge direction, so a convergence point (many
-  // arrows pointing IN) lands at the BOTTOM even when it is the block the
-  // user should read first. Instead we pick a `primary` block by
-  // connectivity and lay the graph out top-down FROM it: the primary sits
-  // at the top rank and everything else descends by graph distance.
-  //
-  // Only the edges dagre RANKS on are re-oriented here. The rendered
-  // arrows further down keep their original direction, so the semantics
-  // are intact (an arrow into the primary still points at it, i.e. up).
-  const undirected = new Map<string, string[]>();
-  const degree = new Map<string, number>();
-  const inDegree = new Map<string, number>();
-  for (const [u, v] of dagreEdges) {
-    if (!undirected.has(u)) undirected.set(u, []);
-    if (!undirected.has(v)) undirected.set(v, []);
-    undirected.get(u)!.push(v);
-    undirected.get(v)!.push(u);
-    degree.set(u, (degree.get(u) ?? 0) + 1);
-    degree.set(v, (degree.get(v) ?? 0) + 1);
-    inDegree.set(v, (inDegree.get(v) ?? 0) + 1);
-  }
-  // Primary = most-connected block; ties broken by in-degree (a hub that
-  // everything feeds), then emission order: the loop runs in emission
-  // order and only replaces on a strict gain, so the earliest wins ties.
-  let primary: string | null = null;
-  for (const b of schema.blocks) {
-    if (!connected.has(b.id)) continue;
-    if (primary === null) {
-      primary = b.id;
-      continue;
-    }
-    const d = degree.get(b.id) ?? 0;
-    const pd = degree.get(primary) ?? 0;
-    if (
-      d > pd ||
-      (d === pd &&
-        (inDegree.get(b.id) ?? 0) > (inDegree.get(primary) ?? 0))
-    ) {
-      primary = b.id;
-    }
-  }
-  // BFS distance from the primary (then from any other component's first
-  // unvisited block) gives every connected block a layer.
-  const depth = new Map<string, number>();
-  const bfsFrom = (root: string) => {
-    depth.set(root, 0);
-    const queue = [root];
-    while (queue.length > 0) {
-      const u = queue.shift()!;
-      for (const w of undirected.get(u) ?? []) {
-        if (!depth.has(w)) {
-          depth.set(w, (depth.get(u) ?? 0) + 1);
-          queue.push(w);
-        }
-      }
-    }
-  };
-  if (primary) bfsFrom(primary);
-  for (const b of schema.blocks) {
-    if (connected.has(b.id) && !depth.has(b.id)) bfsFrom(b.id);
-  }
-
+  // --- Flow ranking -----------------------------------------------------
+  // Edges feed dagre in their REAL direction, so ranks follow the flow:
+  // blocks nothing points at (entry scripts, top-level UI shells) take
+  // the top rank and everything else descends the way the arrows point.
+  // The layout itself is the reading order: start at the top, follow the
+  // arrows down. An earlier version re-rooted the ranking on the block
+  // with the most connections; that answered "which block matters most",
+  // not "where do I start reading", and a well-connected newcomer could
+  // steal the root and reshuffle the whole diagram. dagre breaks the
+  // occasional cycle by reversing an edge internally, so a rare arrow can
+  // still point upward; rendered arrows always keep their true direction.
   for (const b of schema.blocks) {
     if (!connected.has(b.id)) continue;
     g.setNode(b.id, { width: NODE_W, height: blockHeight(b) });
   }
-  // Feed dagre edges oriented shallow->deep so the primary (depth 0) ranks
-  // at the top. Same-depth edges are skipped from ranking (they would
-  // shove siblings onto adjacent ranks); they still render as arrows.
-  for (const [from, to] of dagreEdges) {
-    const df = depth.get(from);
-    const dt = depth.get(to);
-    if (df === undefined || dt === undefined) g.setEdge(from, to);
-    else if (df < dt) g.setEdge(from, to);
-    else if (dt < df) g.setEdge(to, from);
-  }
+  for (const [from, to] of dagreEdges) g.setEdge(from, to);
 
   dagre.layout(g);
 
@@ -232,9 +182,17 @@ export function layoutSchema(
   if (islands.length > 0) {
     const colStride = NODE_W + ISLAND_GAP_X;
     const hasSpine = Number.isFinite(spineMinX);
-    const startX = hasSpine ? spineMinX : 20;
+    // Indent past the bottom-left chrome, but never so far that not even
+    // one column fits inside the spine's width.
+    const indent = hasSpine
+      ? Math.min(
+          ISLAND_CHROME_INDENT,
+          Math.max(0, spineMaxX - spineMinX - NODE_W),
+        )
+      : ISLAND_CHROME_INDENT;
+    const startX = (hasSpine ? spineMinX : 20) + indent;
     const startY = hasSpine ? spineMaxY + ISLAND_BAND_GAP : 20;
-    const bandWidth = hasSpine ? spineMaxX - spineMinX : colStride * 4 - ISLAND_GAP_X;
+    const bandWidth = hasSpine ? spineMaxX - startX : colStride * 4 - ISLAND_GAP_X;
     const maxCols = Math.max(1, Math.floor((bandWidth + ISLAND_GAP_X) / colStride));
 
     let col = 0;
@@ -270,6 +228,7 @@ export function layoutSchema(
         isFocused: focusedSet.has(b.id),
         isDimmed: hasFocus && !focusedSet.has(b.id),
         isPending: b.pending === true,
+        promotedDetail: b.promotedDetail === true,
         isRecentlyAdded: false, // injected by attachInteractive
       },
     };
@@ -361,9 +320,10 @@ export function layoutSchema(
       // the class so they render as a normal solid line.
       className: isPending ? "pending-edge" : undefined,
       // Arrowhead at the target end so the relationship's DIRECTION is
-      // visible. With the importance-based top-down layout the source can
-      // sit below the target, so without a head the line reads ambiguous
-      // (or backwards). The head lands at whichever handle the edge enters.
+      // visible. Ranks follow the arrows, but a cycle broken by dagre can
+      // still leave a source below its target, so without a head such a
+      // line reads ambiguous (or backwards). The head lands at whichever
+      // handle the edge enters.
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 16,

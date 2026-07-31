@@ -1,31 +1,24 @@
-import { SlidersHorizontal } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import type { IntentSelection } from "../../types";
 import { VERBS } from "./IntentSurvey";
 import { intentSummary } from "./IntentSurveySteps";
+import { capabilityIcon } from "../../util/capabilityIcon";
 
 /**
- * Chip showing the user's current onboarding intent. Lives in the panel
- * header (portaled there from the canvas so it does not cover the
- * diagram) and replaces the old blunt "Regenerate" button. Its two jobs
- * are made explicit:
+ * Compact chip showing the user's current onboarding intent, in the panel
+ * header (portaled there from the canvas so it does not cover the diagram).
  *
- *   - LEFT zone  = what you picked. Discrete capability selections render
- *     as small colored tags (a swatch + the label) so multiple picks read
- *     clearly; a free-text answer renders as plain text.
- *   - RIGHT zone = a clear "Change" affordance, so it reads as editable.
+ * Collapsed it is ONE small button: the verb plus a count. It deliberately
+ * does NOT spell the selections out inline. Listing them made the chip run
+ * the width of the header and read as a row of separate controls, so it was
+ * never clear what was clickable or where to press.
  *
- * Clicking reopens the survey pre-filled. Just looking does not
- * regenerate; only changing the selection does (handled by the parent).
- * The "Change" icon is deliberately NOT a pencil, so it does not clash
- * with the pencil that is the "Edit" verb's own icon.
+ * Clicking opens a popover that lists exactly what is being emphasized, with
+ * a single "Change" action at the bottom that reopens the survey pre-filled.
+ * So the chip answers "what am I focused on?" on its own, and only the
+ * explicit Change re-enters the flow (looking never regenerates).
  */
-
-/** Selection tags use ONE neutral parchment style on purpose. The block
- *  category palette already owns the colored space, so coloring these
- *  would clash with (and be mistaken for) the blocks. A colorless chip
- *  reads cleanly as "what you picked" without competing with the diagram. */
-const MAX_TAGS = 3;
-
 export function IntentChip({
   intent,
   onEdit,
@@ -33,67 +26,135 @@ export function IntentChip({
   intent: IntentSelection;
   onEdit: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  // Keep the popover mounted through its close animation, then drop it.
+  const [render, setRender] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setRender(true);
+      return;
+    }
+    if (!render) return;
+    const t = window.setTimeout(() => setRender(false), 150);
+    return () => window.clearTimeout(t);
+  }, [open, render]);
   const meta = VERBS.find((v) => v.value === intent.verb);
   const Icon = meta?.icon;
-  // Discrete selections that should render as colored tags. Free-text
-  // verbs (or free-text answers) fall back to a plain summary string.
+  // Discrete selections that can be listed. Free-text verbs (or free-text
+  // answers) fall back to a plain summary string inside the popover.
   const caps =
     intent.verb === "understand"
       ? intent.understandCaps
       : intent.verb === "edit" || intent.verb === "reference"
         ? intent.capabilities
         : [];
-  const shown = caps.slice(0, MAX_TAGS);
-  const overflow = caps.length - shown.length;
 
   return (
-    <button
-      type="button"
-      onClick={onEdit}
-      title="Your current focus. Click to change what the diagram emphasizes (it only regenerates if you actually change the selection)."
-      className="flex max-w-[480px] items-center gap-2.5 rounded-full border border-[#E7E2DA] bg-white py-1 pl-1.5 pr-2.5 shadow-sm transition-colors hover:border-[#D8CFC2] hover:bg-[#FCFBF9]"
-    >
-      {Icon && meta && (
-        <span
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-          style={{ background: meta.tint, color: meta.accent }}
-        >
-          <Icon className="h-3.5 w-3.5" strokeWidth={2.2} />
-        </span>
-      )}
-      <span
-        className="shrink-0 text-[10.5px] font-semibold uppercase tracking-wide"
-        style={{ color: meta?.accent }}
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="Your current focus. Click to see what the diagram is emphasizing."
+        className={`flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2 transition-colors ${
+          open
+            ? "rounded-bl-none bg-black/[0.07]"
+            : "hover:bg-black/[0.05]"
+        }`}
       >
-        {meta?.label}
-      </span>
-      {caps.length > 0 ? (
-        <span className="flex min-w-0 items-center gap-1">
-          {shown.map((c) => (
-            <span
-              key={c.id}
-              className="max-w-[150px] truncate rounded-md border border-[#E4DCD0] bg-[#F2EDE4] px-1.5 py-0.5 text-[11px] font-medium text-[#6B6155]"
-              title={c.label}
-            >
-              {c.label}
-            </span>
-          ))}
-          {overflow > 0 && (
-            <span className="shrink-0 rounded-md border border-[#E4DCD0] bg-[#EAE3D9] px-1.5 py-0.5 text-[11px] font-medium text-[#8A8178]">
-              +{overflow}
-            </span>
-          )}
+        {Icon && meta && (
+          <span
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+            style={{ background: meta.tint, color: meta.accent }}
+          >
+            <Icon className="h-3 w-3" strokeWidth={2.2} />
+          </span>
+        )}
+        <span
+          className="text-[12px] font-semibold leading-none"
+          style={{ color: meta?.accent }}
+        >
+          {meta?.label}
         </span>
-      ) : (
-        <span className="truncate text-[12.5px] text-[#5C544B]">
-          {intentSummary(intent)}
-        </span>
+        {caps.length > 0 && (
+          <span className="rounded-full bg-black/[0.07] px-1.5 text-[10px] font-medium leading-4 text-[#6E6D68]">
+            {caps.length}
+          </span>
+        )}
+        <ChevronDown
+          className={`h-3 w-3 shrink-0 text-[#8C8B87] transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+          strokeWidth={2.5}
+        />
+      </button>
+
+      {render && (
+        <>
+          {/* Click-away catcher. */}
+          <div className="fixed inset-0 z-[59]" onClick={() => setOpen(false)} />
+          {/* Flush against the chip (no gap) and sharing its left edge, so the
+           *  two read as one surface. Grows down out of the chip on open and
+           *  folds back up on close (transform-origin at the top). */}
+          <div
+            className={`absolute left-0 top-full z-[60] w-64 overflow-hidden rounded-b-xl rounded-tr-xl border border-[#E7E4DD] bg-white shadow-[0_10px_28px_-8px_rgba(60,53,47,0.18)] ${
+              open ? "intent-pop-in" : "intent-pop-out"
+            }`}
+          >
+            {/* Header: just the label + the single change action. No tint, no
+             *  leading icon: kept colourless on purpose so nothing here reads
+             *  as tied to a block colour (those may be re-tuned). */}
+            <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wide text-[#9A968D]">
+                Emphasizing
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onEdit();
+                }}
+                title="Change what is emphasized"
+                aria-label="Change what is emphasized"
+                className="-mr-1 flex h-6 w-6 items-center justify-center rounded-md text-[#A3A29D] transition-colors hover:bg-black/[0.06] hover:text-[#3A3A38]"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </div>
+            {/* Selected capabilities: black label, its own type icon trailing.
+             *  The icon (not a colour) is what distinguishes them, so the list
+             *  stays legible whatever the category colours become. */}
+            <div className="px-1.5 pb-1.5">
+              {caps.length > 0 ? (
+                caps.map((c) => {
+                  const CapIcon = capabilityIcon(
+                    c.icon,
+                    `${c.label} ${c.caption ?? ""}`,
+                  );
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5"
+                    >
+                      <span className="min-w-0 break-words text-[12.5px] leading-snug text-[#2C2A26]">
+                        {c.label}
+                      </span>
+                      <CapIcon
+                        className="h-3.5 w-3.5 shrink-0 text-[#9A968D]"
+                        strokeWidth={2}
+                      />
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="px-2 py-1.5 text-[12.5px] leading-snug text-[#2C2A26]">
+                  {intentSummary(intent)}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
-      <span className="mx-0.5 h-4 w-px shrink-0 bg-[#EAE4DA]" />
-      <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#A0894F]">
-        <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
-        Change
-      </span>
-    </button>
+    </div>
   );
 }

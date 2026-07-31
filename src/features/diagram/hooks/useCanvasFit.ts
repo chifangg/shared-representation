@@ -24,33 +24,46 @@ export function useCanvasFit({
   view,
   focused,
   nodes,
+  suspend = false,
 }: {
   state: FetchState;
   view: DiagramView;
   focused: FocusState | null;
   nodes: unknown[];
+  /** Pause every auto-fit while an overlay owns the camera (the connection
+   *  lens frames its own two blocks; a canvas-wide fit landing mid-flight
+   *  would stomp that framing and misplace the lens's margin note). */
+  suspend?: boolean;
 }): React.MutableRefObject<HTMLDivElement | null> {
   const { fitView } = useReactFlow();
 
-  // Auto-fit viewport whenever the node set grows during streaming.
+  // Auto-fit viewport whenever the node set GROWS during streaming. Guarded on
+  // the previous count rather than just running whenever the effect re-runs:
+  // an animated fit that fires on a spurious re-run reads as the canvas
+  // drifting for half a second for no reason the user can attribute.
+  const prevCountRef = useRef(0);
   useEffect(() => {
-    if (nodes.length === 0) return;
+    const grew = nodes.length > prevCountRef.current;
+    prevCountRef.current = nodes.length;
+    if (suspend) return;
+    if (nodes.length === 0 || !grew) return;
     const t = window.setTimeout(() => {
       fitView({ padding: 0.15, duration: 400, maxZoom: 1.6 });
     }, 60);
     return () => window.clearTimeout(t);
-  }, [nodes.length, fitView]);
+  }, [nodes.length, fitView, suspend]);
 
   // Final fit after streaming completes — edges may have arrived after
   // the last node-trigger, and dagre may have shifted positions.
   useEffect(() => {
+    if (suspend) return;
     if (state.kind !== "ready") return;
     if (nodes.length === 0) return;
     const t = window.setTimeout(() => {
       fitView({ padding: 0.15, duration: 500, maxZoom: 1.6 });
     }, 120);
     return () => window.clearTimeout(t);
-  }, [state, fitView, nodes.length]);
+  }, [state, fitView, nodes.length, suspend]);
 
   // Recenter the viewport whenever the canvas's available width
   // changes — the side panel sliding in/out, the user dragging the
@@ -60,27 +73,30 @@ export function useCanvasFit({
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const fitFnRef = useRef<() => void>(() => {});
   fitFnRef.current = () => {
+    if (suspend) return;
     if (state.kind !== "ready") return;
     if (nodes.length === 0) return;
-    // Gentle pan/zoom (400ms, not 220) so toggling focus mode on/off, where
-    // the panel opening/closing changes the canvas width and triggers this
-    // refit, glides instead of snapping. A snap at this size reads as jarring.
+    // duration 0: the resize path must track the container LIVE. Any easing
+    // here reads as the canvas lagging the panel edge, because the animation
+    // only starts once the size stops changing. Animated fits are still used
+    // for CONTENT changes (streaming / settle) in the effects above, where a
+    // glide is what you want.
     if (view === "focus" && focused && focused.ids.length > 0) {
       fitView({
         nodes: focused.ids.map((id) => ({ id })),
         padding: 0.3,
-        duration: 400,
+        duration: 0,
         maxZoom: 1.3,
         minZoom: 0.5,
       });
     } else {
-      fitView({ padding: 0.15, duration: 400, maxZoom: 1.6 });
+      fitView({ padding: 0.15, duration: 0, maxZoom: 1.6 });
     }
   };
   useEffect(() => {
     const el = canvasContainerRef.current;
     if (!el) return;
-    let timer: number | undefined;
+    let raf = 0;
     let isFirst = true;
     const ro = new ResizeObserver(() => {
       // Skip the very first observation — that's the initial mount,
@@ -90,12 +106,18 @@ export function useCanvasFit({
         isFirst = false;
         return;
       }
-      if (timer !== undefined) window.clearTimeout(timer);
-      timer = window.setTimeout(() => fitFnRef.current(), 80);
+      // Coalesce to one fit per frame instead of debouncing. Debouncing meant
+      // nothing moved until 80ms AFTER the drag ended; this keeps the diagram
+      // tracking the panel edge while it is being dragged.
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        fitFnRef.current();
+      });
     });
     ro.observe(el);
     return () => {
-      if (timer !== undefined) window.clearTimeout(timer);
+      if (raf) window.cancelAnimationFrame(raf);
       ro.disconnect();
     };
   }, []);

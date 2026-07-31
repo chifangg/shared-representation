@@ -1,5 +1,10 @@
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 
+/** Tallest the input grows before it starts scrolling internally (px).
+ *  About six lines; past that the textarea scrolls instead of pushing the
+ *  transcript up further. */
+const MAX_INPUT_H = 148;
+
 export function PromptInput({
   onSubmit,
   onCancel,
@@ -32,12 +37,13 @@ export function PromptInput({
   };
 
   return (
-    <div className="border-t border-[#E2DACB] bg-[#F0EADE] p-3">
+    <div className="border-t border-[#C9C8C3] bg-[#DCDBD6] p-3">
       {attachments}
       <div className="flex items-end gap-2">
       <textarea
-        className="flex-1 resize-none rounded-lg border border-[#E2DACB] bg-white px-3 py-2 text-[14px] text-[#2E2A25] placeholder:text-[#B3A998] outline-none focus:border-[#B7AE9C] disabled:opacity-60"
-        placeholder={running ? "Streaming…" : "Type a message…"}
+        className="chat-input flex-1 resize-none overflow-y-auto rounded-lg border border-[#D9D7D2] bg-white px-3 py-2 text-[14px] leading-snug text-[#2E2A25] placeholder:text-[#AEADA8] outline-none focus:border-[#C4C2BB] disabled:opacity-60"
+        style={{ maxHeight: MAX_INPUT_H }}
+        placeholder={running ? "Streaming…" : "Message…"}
         rows={1}
         value={value}
         disabled={disabled}

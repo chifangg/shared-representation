@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dagre from "@dagrejs/dagre";
 import {
   Background,
@@ -6,6 +6,7 @@ import {
   useReactFlow,
   type Edge,
   type Node,
+  type NodeChange,
 } from "@xyflow/react";
 import type {
   DiagramArrow,
@@ -65,19 +66,89 @@ export function FocusMiniGraph({
     setSelectedMiniId(null);
   }, []);
 
+  // Detail blocks the user has dragged, keyed by block id. dagre computes a
+  // fresh layout every render, so without this a drag would snap straight
+  // back on the next render. The override wins over dagre's slot (like the
+  // main canvas' userPositionsRef). Reset per new focus round so a new
+  // question re-lays out cleanly. `pinnedRef` records that the user has taken
+  // manual control, which suppresses the auto-fit so it stops fighting drags.
+  const [userPos, setUserPos] = useState<
+    Map<string, { x: number; y: number }>
+  >(new Map());
+  const pinnedRef = useRef(false);
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node<MiniNodeData>>[]) => {
+      const updates: Array<{ id: string; position: { x: number; y: number } }> =
+        [];
+      for (const c of changes) {
+        if (c.type === "position" && c.position && !c.id.startsWith("ghost-")) {
+          updates.push({ id: c.id, position: c.position });
+        }
+      }
+      if (updates.length === 0) return;
+      pinnedRef.current = true;
+      setUserPos((prev) => {
+        const next = new Map(prev);
+        for (const u of updates) next.set(u.id, u.position);
+        return next;
+      });
+    },
+    [],
+  );
+  const focusKey = focused.ids.join("|");
+  useEffect(() => {
+    setUserPos(new Map());
+    pinnedRef.current = false;
+  }, [focusKey]);
+
+  // The promote callbacks come from the canvas and get a new identity on every
+  // canvas render (including every frame of a panel-width drag). Route them
+  // through refs so the layout memo below is not invalidated by them.
+  const onPromoteRef = useRef(onPromote);
+  onPromoteRef.current = onPromote;
+  const onUnpromoteRef = useRef(onUnpromote);
+  onUnpromoteRef.current = onUnpromote;
+  const promote = useCallback((b: DiagramBlock) => onPromoteRef.current(b), []);
+  const unpromote = useCallback(
+    (b: DiagramBlock) => onUnpromoteRef.current(b),
+    [],
+  );
+  // Set identity is not stable either; compare by content.
+  const promotedKey = useMemo(
+    () => [...promotedIds].sort().join("|"),
+    [promotedIds],
+  );
+
   // Build mini-layout: ghost focused base blocks at top, detail
   // blocks below, dagre TB. Arrow set spans both layers so the
   // viewer can see where each detail attaches.
-  const { nodes, edges } = (() => {
-    const ghostNodes = focused.ids
+  //
+  // MEMOIZED: this runs a full dagre.layout() and hands the nested ReactFlow
+  // brand-new node/edge identities. As a bare IIFE it re-ran on EVERY render,
+  // so dragging the panel edge (a setState per pointer frame) relaid out the
+  // whole graph once per frame.
+  const { nodes, edges } = useMemo(() => {
+    // Ghosts: the model's focused ids PLUS any canvas block a detail
+    // names as its parent. The model sometimes parents a detail under a
+    // canvas block it forgot to list in the focus call; without this the
+    // containment edge got dropped and the whole detail chain floated
+    // disconnected beside the ON CANVAS chips.
+    const ghostIds: string[] = [...focused.ids];
+    for (const b of focused.blocks) {
+      if (b.parent && !ghostIds.includes(b.parent)) ghostIds.push(b.parent);
+    }
+    const ghostNodes = ghostIds
       .map((id) => baseBlocks.find((b) => b.id === id))
       .filter((b): b is DiagramBlock => Boolean(b));
 
     const g = new dagre.graphlib.Graph();
     g.setGraph({
       rankdir: "TB",
-      nodesep: 26,
-      ranksep: 44,
+      // Roomier than before: a collapsed detail card actually renders ~78px
+      // tall (title + 2-line caption + feature count), so the old 56 height
+      // + tight ranksep let adjacent ranks overlap while streaming in.
+      nodesep: 34,
+      ranksep: 64,
       marginx: 16,
       marginy: 16,
     });
@@ -88,7 +159,7 @@ export function FocusMiniGraph({
       const isSel = b.id === selectedMiniId;
       g.setNode(b.id, {
         width: isSel ? 220 : 160,
-        height: isSel ? estimateMiniExpandedHeight(b) : 56,
+        height: isSel ? estimateMiniExpandedHeight(b) : 78,
       });
     }
 
@@ -138,11 +209,13 @@ export function FocusMiniGraph({
         const pos = g.node(b.id);
         const isSel = b.id === selectedMiniId;
         const w = isSel ? 220 : 160;
-        const h = isSel ? estimateMiniExpandedHeight(b) : 56;
+        const h = isSel ? estimateMiniExpandedHeight(b) : 78;
         return {
           id: b.id,
           type: "mini",
-          position: { x: pos.x - w / 2, y: pos.y - h / 2 },
+          // A manual drag (userPos) wins over dagre's fresh slot.
+          position:
+            userPos.get(b.id) ?? { x: pos.x - w / 2, y: pos.y - h / 2 },
           data: {
             label: b.label,
             caption: b.caption,
@@ -152,8 +225,8 @@ export function FocusMiniGraph({
             isPromoted: promotedIds.has(b.id),
             isSelected: isSel,
             block: b,
-            onPromote,
-            onUnpromote,
+            onPromote: promote,
+            onUnpromote: unpromote,
           },
         };
       }),
@@ -193,11 +266,31 @@ export function FocusMiniGraph({
       });
     }
     return { nodes, edges };
-  })();
+    // promotedKey stands in for promotedIds (Set identity is unstable);
+    // promote/unpromote are ref-backed and stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    focused,
+    baseBlocks,
+    selectedMiniId,
+    userPos,
+    promotedKey,
+    promote,
+    unpromote,
+  ]);
 
   // Fit on every layout change (new detail blocks streaming in,
-  // panel resize, promotion removing nodes, click-to-expand).
+  // promotion removing nodes, click-to-expand) UNTIL the user drags a
+  // block. After that they own the framing, so stop auto-fitting.
+  const lastFitKeyRef = useRef("");
   useEffect(() => {
+    if (pinnedRef.current) return;
+    // Only animate when the layout ACTUALLY changed. Without this guard a
+    // spurious re-run replays a 350ms camera move, which reads as the panel
+    // drifting for half a second after an unrelated interaction.
+    const key = `${nodes.length}:${edges.length}:${selectedMiniId ?? ""}`;
+    if (key === lastFitKeyRef.current) return;
+    lastFitKeyRef.current = key;
     const t = window.setTimeout(() => {
       fitView({ padding: 0.18, duration: 350, maxZoom: 1.3 });
     }, 80);
@@ -211,21 +304,26 @@ export function FocusMiniGraph({
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
-    let timer: number | undefined;
+    let raf = 0;
     let isFirst = true;
     const ro = new ResizeObserver(() => {
       if (isFirst) {
         isFirst = false;
         return;
       }
-      if (timer !== undefined) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        fitView({ padding: 0.18, duration: 220, maxZoom: 1.3 });
-      }, 80);
+      if (pinnedRef.current) return;
+      // One instant fit per frame, not a debounced animated one: while the
+      // panel handle is being dragged the mini-graph has to track the width
+      // live, otherwise it only catches up ~300ms after the drag ends.
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        fitView({ padding: 0.18, duration: 0, maxZoom: 1.3 });
+      });
     });
     ro.observe(el);
     return () => {
-      if (timer !== undefined) window.clearTimeout(timer);
+      if (raf) window.cancelAnimationFrame(raf);
       ro.disconnect();
     };
   }, [fitView]);
@@ -237,6 +335,7 @@ export function FocusMiniGraph({
         edges={edges}
         nodeTypes={miniNodeTypes}
         edgeTypes={miniEdgeTypes}
+        onNodesChange={onNodesChange}
         onNodeClick={onMiniNodeClick}
         onPaneClick={onMiniPaneClick}
         fitView

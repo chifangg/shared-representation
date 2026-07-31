@@ -153,7 +153,7 @@ export function IntentSurvey({
 
   return (
     <div
-      className="survey-overlay-in pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-[#2A2622]/30 backdrop-blur-[3px]"
+      className="survey-overlay-in pointer-events-auto absolute inset-0 z-[80] flex items-center justify-center bg-[#2A2622]/30 backdrop-blur-[3px]"
       onMouseDown={(e) => {
         if (onCancel && e.target === e.currentTarget) onCancel();
       }}

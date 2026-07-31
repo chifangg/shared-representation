@@ -63,6 +63,10 @@ export type DiagramBlock = {
    *  hasn't been scaffolded yet". Cleared once the auto-regen after
    *  Claude finishes replaces the placeholder with a real block. */
   pending?: boolean;
+  /** Frontend-only marker: this block was promoted out of another block's
+   *  detail view. Renders a small corner mark so back on the overview the
+   *  user can tell a lifted detail from a top-level module. */
+  promotedDetail?: boolean;
 };
 
 export type DiagramArrow = {
@@ -126,6 +130,12 @@ export type ConnectionLensDetail = {
   /** Screen coords of the click, to anchor the overlay. */
   x: number;
   y: number;
+  /** The edge's label anchor in FLOW coords. This, not the click point, is
+   *  what the annotation's leader line is tied to: it puts the terminator dot
+   *  on the verb pill itself and survives pan and zoom exactly, with no
+   *  screen-to-flow conversion to drift. */
+  fx: number;
+  fy: number;
 };
 
 /** The structured onboarding answer. Retained (not just the composed goal
@@ -199,6 +209,11 @@ export interface OptionExecutedDetail {
   option: ConnectionOption;
 }
 
+/** The user closed the cards overlay without picking any option. */
+export interface OptionsCancelledDetail {
+  target: EditTarget;
+}
+
 export interface ArrowsAddedDetail {
   arrows: Array<{ from: string; to: string; label: string }>;
 }
@@ -225,6 +240,8 @@ export type BlockNodeData = {
   isContainer: boolean;
   isFocused: boolean;
   isDimmed: boolean;
+  /** Mirrors DiagramBlock.promotedDetail for the corner mark. */
+  promotedDetail?: boolean;
   /** User clicked this block to drill in: the description un-clamps to
    *  full length AND the feature bubbles fan out, in lockstep. Driven by
    *  expandedBlockId (the bubble-focus state), not React Flow's

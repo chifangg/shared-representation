@@ -20,7 +20,15 @@ import {
   clientToolRegistry,
   toolResultRegistry,
 } from "@/core/tools/registry";
-import { Bot, User, Upload, Sparkles, ChevronRight, Box } from "lucide-react";
+import {
+  Bot,
+  User,
+  Upload,
+  Sparkles,
+  ChevronRight,
+  Box,
+  SquarePen,
+} from "lucide-react";
 import { useProject, buildChatSystemPrompt } from "@/core/project";
 import {
   ArrowsAddedSink,
@@ -29,7 +37,7 @@ import {
   parseTargetMetadata,
   parseVisualEditMessage,
   stripJsonCodeBlocks,
-  useDiagramBusSubscribe,
+  useVisualEditSend,
   type EditTarget,
 } from "@/features/diagram";
 
@@ -75,6 +83,8 @@ export function ChatView({ model }: { model?: string }) {
     logEvent("chat-new", { messages: session.messages.length });
     session.reset();
     clearActivity();
+    // Drop any queued visual-edit so it can't fire into the fresh session.
+    resetVisualEditQueue();
   };
 
   const handleSend = (prompt: string) => {
@@ -86,6 +96,15 @@ export function ChatView({ model }: { model?: string }) {
       session.send(prompt);
     }
   };
+
+  // Bridge: diagram-side visual edits (e.g. inline-rename a block) arrive
+  // on the bus as pre-formatted prompts; the hook routes them through the
+  // same `handleSend` path (queueing while Claude is mid-turn) so they
+  // show up in conversation alongside typed messages.
+  const resetVisualEditQueue = useVisualEditSend({
+    send: handleSend,
+    running,
+  });
 
   // Context attachments dragged in from the diagram (blocks, capability
   // bubbles, connections). Per-message: folded into the prompt on send,
@@ -109,16 +128,6 @@ export function ChatView({ model }: { model?: string }) {
     setContextItems((prev) =>
       prev.some((p) => p.id === item.id) ? prev : [...prev, item],
     );
-  });
-
-  // Bridge: diagram-side visual edits (e.g. inline-rename a block)
-  // emit a "visual-edit" bus message carrying a pre-formatted prompt;
-  // we route it through the same `handleSend` path so the visual edit
-  // shows up in conversation alongside typed messages.
-  useDiagramBusSubscribe("visual-edit", (detail) => {
-    if (!detail?.prompt) return;
-    if (running) return; // ignore mid-turn; Claude is busy
-    handleSend(detail.prompt);
   });
 
   const turns = useMemo(() => projectTurns(session.messages), [session.messages]);
@@ -232,36 +241,36 @@ export function ChatView({ model }: { model?: string }) {
   return (
     <div
       ref={dropRef}
-      className="relative flex h-full w-full flex-col bg-[#F7F3EB] text-[#2E2A25]"
+      className="relative flex h-full w-full flex-col bg-[#F2F1EF] text-[#2E2A25]"
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-[#B7AE9C] bg-[#F7F3EB]/70 backdrop-blur-[1px]">
+        <div className="pointer-events-none absolute inset-2 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-[#C9C7C1] bg-[#F2F1EF]/70 backdrop-blur-[1px]">
           <span className="rounded-md border border-[#E2DACB] bg-white/95 px-3 py-1.5 text-sm font-medium text-[#6E6457] shadow-sm">
             Drop to add as context
           </span>
         </div>
       )}
-      <header className="flex h-11 items-center justify-between border-b border-[#E2DACB] bg-[#F0EADE] px-4">
-        <div className="text-sm font-medium text-[#2E2A25]">Chat</div>
+      {/* Minimal header: just enough to identify the panel as Chat and keep
+       *  New chat reachable (needed after a backend rebuild). Same warm-paper
+       *  header as the other panels, no session-id debug line. */}
+      <header className="flex h-11 shrink-0 items-center justify-between border-b border-[#C9C8C3] bg-[#DCDBD6] px-3 text-sm font-medium text-[#33322F]">
+        <span>Chat</span>
         <button
           onClick={handleNewChat}
-          className="rounded-md border border-[#E2DACB] bg-white px-2.5 py-1 text-xs text-[#6E6457] transition-colors hover:bg-[#F5F0E6] hover:text-[#2E2A25]"
+          title="New chat"
+          aria-label="New chat"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-[#8C8B87] transition-colors hover:bg-black/[0.06] hover:text-[#2C2B28]"
         >
-          New chat
+          <SquarePen className="h-4 w-4" strokeWidth={2} />
         </button>
       </header>
-      <div className="flex items-center gap-2 border-b border-[#EAE3D6] bg-[#F4EEE2] px-4 py-2 font-mono text-[11px] text-[#A89E8E]">
-        <span className="shrink-0">session {session.sessionId.slice(0, 8)}</span>
-        <span className="text-[#CFC6B5]">·</span>
-        <span className="shrink-0">
-          {hasFiles ? `${files.length} files loaded` : "no project"}
-        </span>
-      </div>
 
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 py-4 space-y-4"
+        // contain:layout paint keeps the (long, fully wrapped) transcript out
+        // of the document-wide reflow that a panel resize triggers.
+        className="flex-1 overflow-y-auto px-3 py-4 space-y-4 [contain:layout_paint]"
       >
         {turns.length === 0 && !hasFiles && <NoProjectPrompt />}
         {turns.length === 0 && hasFiles && <ReadyPrompt />}
@@ -432,7 +441,7 @@ function Avatar({ role }: { role: "user" | "assistant" }) {
  *  alone is not visible when scrolling back). Readable on the gray block. */
 function TargetChip({ label }: { label: string }) {
   return (
-    <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md border border-black/[0.06] bg-white/90 px-2 py-[3px] text-[11px] font-medium text-[#3A352B]">
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-black/[0.06] bg-white/90 px-2 py-[3px] text-[11px] font-medium text-[#3A352B]">
       <Box
         className="h-3 w-3 shrink-0 text-[#8C8275]"
         strokeWidth={2}
@@ -471,10 +480,10 @@ function TurnBubble({
       return (
         <div className="flex items-start justify-end gap-2">
           <div
-            className="inline-flex max-w-[82%] flex-col gap-1.5 rounded-[10px] bg-[#BAB5AB] px-3.5 py-2.5"
+            className="inline-flex min-w-0 max-w-[82%] flex-col gap-1.5 rounded-[10px] bg-[#DBD8D1] px-3.5 py-2.5"
             style={{
               boxShadow:
-                "inset 0 2px 4px rgba(40,35,28,0.22), inset 0 -1px 0 rgba(255,255,255,0.30)",
+                "inset 0 1px 3px rgba(40,35,28,0.13), inset 0 -1px 0 rgba(255,255,255,0.45)",
             }}
           >
             <span className="text-[10.5px] font-semibold uppercase tracking-wide text-[#2A251D]">
@@ -484,7 +493,7 @@ function TurnBubble({
               {visualEdit.summary}
             </span>
             {target && (
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {target.kind === "block" ? (
                   <TargetChip label={target.label} />
                 ) : (

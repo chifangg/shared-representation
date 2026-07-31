@@ -14,14 +14,39 @@ import type { ClaudeMessage } from "@/core/hooks/useClaudeSession";
 
 type AnyMsg = { type?: string; message?: { content?: unknown } };
 
-function isUserPrompt(m: AnyMsg): boolean {
-  if (m.type !== "user") return false;
-  const c = m.message?.content;
+/**
+ * A GENUINE user turn (typed prompt or executed visual edit), NOT a
+ * tool-result round-trip. The stream-json protocol delivers tool results
+ * as `role: "user"` messages too, so callers that count "user turns" must
+ * exclude them: a real prompt has string content, or an array with no
+ * `tool_result` block; a tool result carries `tool_result` blocks.
+ */
+export function isUserPrompt(m: ClaudeMessage): boolean {
+  const mm = m as AnyMsg;
+  if (mm.type !== "user") return false;
+  const c = mm.message?.content;
   if (typeof c === "string") return true;
   if (Array.isArray(c)) {
     return !c.some((b) => (b as { type?: string })?.type === "tool_result");
   }
   return true;
+}
+
+/**
+ * Tool names arrive MCP-qualified in Claude's stream: the backend serves the
+ * client tools through its bridge, so `write_project_file` reaches us as
+ * `mcp__template-tools__write_project_file` (see backend/src/core/tools.rs,
+ * MCP_SERVER_NAME). Matching the bare name exactly therefore never hit, which
+ * silently emptied the edited-file set: new blocks got handed no files, so
+ * their capability refresh had nothing to read and they opened with no
+ * bubbles. Compare on the trailing segment so both spellings match, and so a
+ * rename of the MCP server cannot break this again.
+ */
+const EDIT_TOOLS = new Set(["edit_project_file", "write_project_file"]);
+function isEditTool(name: string | undefined): boolean {
+  if (!name) return false;
+  const bare = name.includes("__") ? name.slice(name.lastIndexOf("__") + 2) : name;
+  return EDIT_TOOLS.has(bare);
 }
 
 /**
@@ -36,8 +61,8 @@ export function editedFilesInLatestTurn(messages: ClaudeMessage[]): {
   const files = new Set<string>();
   const textChunks: string[] = [];
   for (let i = messages.length - 1; i >= 0; i--) {
+    if (isUserPrompt(messages[i])) break;
     const m = messages[i] as AnyMsg;
-    if (isUserPrompt(m)) break;
     if (m.type !== "assistant") continue;
     const content = m.message?.content;
     if (!Array.isArray(content)) continue;
@@ -49,7 +74,7 @@ export function editedFilesInLatestTurn(messages: ClaudeMessage[]): {
     }>) {
       if (
         b?.type === "tool_use" &&
-        (b.name === "edit_project_file" || b.name === "write_project_file") &&
+        isEditTool(b.name) &&
         typeof b.input?.path === "string"
       ) {
         files.add(b.input.path);

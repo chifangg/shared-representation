@@ -102,8 +102,8 @@ export function ColorSchemeLegend({
       <div className="absolute bottom-4 left-4 z-50 flex flex-col items-start gap-2.5">
         {!picking && topAccessory}
         <div
-          className={`relative rounded-lg border bg-[#FCFBF9]/95 px-3 py-2.5 backdrop-blur-sm transition-all duration-200 ${
-            showDefs ? "w-60" : ""
+          className={`relative rounded-lg border bg-[#FCFBF9]/95 px-2.5 py-2 backdrop-blur-sm transition-all duration-200 ${
+            showDefs ? "w-56" : ""
           } ${
             picking
               ? "scale-[1.04] border-[#D2CABB] shadow-lg"
@@ -234,7 +234,7 @@ export function ColorSchemeLegend({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mb-1.5 flex w-full items-center gap-1 pr-4 text-[10px] font-semibold uppercase tracking-wide text-[#999999] transition-colors hover:text-[#666666]"
+          className="mb-1 flex w-full items-center gap-1 pr-4 text-[9px] font-semibold uppercase tracking-wide text-[#999999] transition-colors hover:text-[#666666]"
           title={showDefs ? "Hide definitions" : "Show what each color means"}
         >
           {showDefs ? (
@@ -245,15 +245,17 @@ export function ColorSchemeLegend({
           <span className="truncate">{active.name}</span>
         </button>
 
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1">
           {items.map((g) => (
-            <div key={g.key} className="flex items-start gap-2">
+            <div key={g.key} className="flex items-start gap-1.5">
+              {/* 1px outline, not 2px: on a swatch this small a thick ring
+                  swallows the fill and the two colours stop being readable. */}
               <span
-                className="mt-0.5 h-3 w-3 shrink-0 rounded-sm border-2"
+                className="mt-[3px] h-2.5 w-2.5 shrink-0 rounded-[3px] border"
                 style={{ backgroundColor: g.tint, borderColor: g.accent }}
               />
               <div className="flex flex-col gap-0.5">
-                <span className="text-[11px] leading-none text-[#2A2622]">
+                <span className="text-[10px] leading-none text-[#2A2622]">
                   {g.label}
                 </span>
                 {showDefs && g.blurb && (

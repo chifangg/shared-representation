@@ -15,6 +15,24 @@ import {
 } from "../../layout/orthogonalRoute";
 import { linkContextItem } from "../../util/contextItem";
 
+/** Pull both endpoints of a routed polyline inward by `gap` px along their
+ *  adjacent segment, so the line + arrowhead stop just short of the block
+ *  instead of butting into its edge (and the now-hidden handle dot). */
+function insetEnds(pts: Pt[], gap: number): Pt[] {
+  if (pts.length < 2) return pts;
+  const move = (from: Pt, toward: Pt): Pt => {
+    const dx = toward.x - from.x;
+    const dy = toward.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const k = Math.min(gap, len) / len;
+    return { x: from.x + dx * k, y: from.y + dy * k };
+  };
+  const out = pts.map((p) => ({ ...p }));
+  out[0] = move(out[0], out[1]);
+  out[out.length - 1] = move(out[out.length - 1], out[out.length - 2]);
+  return out;
+}
+
 /**
  * Custom React Flow edge renderer for a labeled, obstacle-avoiding arrow.
  *
@@ -65,6 +83,9 @@ export function LabeledEdge({
   const routedPath = (data as { routedPath?: Pt[] | null } | undefined)
     ?.routedPath;
   const points = routedPath && routedPath.length >= 2 ? routedPath : null;
+  // Draw a slightly shortened polyline so the arrow keeps a small gap from
+  // the block at both ends; the label anchor still uses the full `points`.
+  const drawPoints = points ? insetEnds(points, 7) : null;
 
   const fallback = getSmoothStepPath({
     sourceX,
@@ -74,7 +95,7 @@ export function LabeledEdge({
     targetY,
     targetPosition,
   });
-  const edgePath = points ? pointsToPath(points) : fallback[0];
+  const edgePath = drawPoints ? pointsToPath(drawPoints) : fallback[0];
   const anchor = points
     ? pathLabelAnchor(points)
     : {
@@ -160,6 +181,8 @@ export function LabeledEdge({
                   verb,
                   x: e.clientX,
                   y: e.clientY,
+                  fx: lx,
+                  fy: ly,
                 });
               }
             : undefined
@@ -195,6 +218,8 @@ export function LabeledEdge({
                       verb,
                       x: e.clientX,
                       y: e.clientY,
+                      fx: lx,
+                      fy: ly,
                     });
                   }
                 : undefined

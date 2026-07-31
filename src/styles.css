@@ -192,6 +192,13 @@ textarea::placeholder {
   opacity: 0.6;
 }
 
+/* Chat input: native content auto-sizing. Empty renders at exactly its
+   `rows` (one line); it grows with the text and caps at its max-height,
+   then scrolls. No JS measurement, so it can never render tall when empty. */
+.chat-input {
+  field-sizing: content;
+}
+
 /* Cursor pointer for all interactive elements */
 button,
 a,
@@ -209,6 +216,16 @@ button:disabled,
 [disabled],
 .disabled {
   cursor: not-allowed !important;
+}
+
+/* Panel resize separators are focusable (tabindex="0"), so the rule above
+   would otherwise give them a pointer cursor and hide the resize affordance.
+   Same specificity, declared later, so these win. */
+[role="separator"][aria-orientation="vertical"] {
+  cursor: col-resize;
+}
+[role="separator"][aria-orientation="horizontal"] {
+  cursor: row-resize;
 }
 
 /* Remove all focus styles globally */
@@ -290,247 +307,6 @@ button:focus-visible,
 
 .panels-animating [data-panel] {
   transition: flex-basis 280ms ease-in-out, flex-grow 280ms ease-in-out;
-}
-
-@keyframes block-grow {
-  from {
-    opacity: 0;
-    transform: scale(0.6) translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.block-node-grow {
-  animation: block-grow 380ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  transform-origin: center center;
-}
-
-.react-flow__node {
-  transition: transform 350ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.react-flow__node.dragging,
-.react-flow__node.selected.dragging {
-  transition: none;
-}
-
-.react-flow__node.selected {
-  z-index: 10 !important;
-}
-
-/* Edge-label pills must sit ABOVE blocks. React Flow renders the
- * edge-label layer BELOW the node layer by default, so a pill that
- * grazes a block's edge gets clipped behind it and reads as a label
- * floating out of nowhere. Lifting the whole layer keeps every pill
- * fully visible and clickable on top of the blocks it sits near. */
-.react-flow__edgelabel-renderer {
-  z-index: 11;
-}
-
-@keyframes loading-bar {
-  0%   { transform: translateX(-100%); }
-  50%  { transform: translateX(150%); }
-  100% { transform: translateX(-100%); }
-}
-
-@keyframes panel-slide-in {
-  from { transform: translateX(100%); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
-}
-
-.panel-slide-in {
-  animation: panel-slide-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-@keyframes focus-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 0 rgba(245, 158, 11, 0.0),
-      0 0 0 6px rgba(245, 158, 11, 0.18);
-  }
-  50% {
-    box-shadow:
-      0 0 0 4px rgba(245, 158, 11, 0.10),
-      0 0 0 10px rgba(245, 158, 11, 0.22);
-  }
-}
-
-.focus-pulse {
-  animation: focus-pulse 1.6s ease-in-out infinite;
-}
-
-/* Inline chat record of an agent diagram action. Flashes a brief blue
-   ring on mount (synced with the canvas block glow), then settles to the
-   recessed sand "record" shadow. `forwards` holds the resting state. */
-@keyframes diagram-action-in {
-  0% {
-    box-shadow: 0 0 0 3px rgba(59, 91, 217, 0);
-  }
-  18% {
-    box-shadow: 0 0 0 3px rgba(59, 91, 217, 0.3);
-  }
-  100% {
-    box-shadow:
-      inset 0 2px 5px rgba(120, 98, 55, 0.22),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.55);
-  }
-}
-
-.diagram-action-in {
-  animation: diagram-action-in 1.8s ease-out forwards;
-}
-
-/* Onboarding survey entrance animations. The card springs up + settles;
-   list items (verb cards, capability rows, pills) rise in with a small
-   per-item delay set inline via `animation-delay` for a staggered feel. */
-@keyframes survey-overlay-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes survey-card-in {
-  from { opacity: 0; transform: translateY(14px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes survey-rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.survey-overlay-in {
-  animation: survey-overlay-in 220ms ease-out both;
-}
-.survey-card-in {
-  animation: survey-card-in 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.survey-rise {
-  animation: survey-rise 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* Bubble pop animations for the click-block → fan-out-bubbles feature.
- *
- * The translate(--enter-dx, --enter-dy) start positions the bubble AT
- * the parent block's center (FunctionBubble passes the offset as CSS
- * custom props), so the animation reads as a radial outward shoot from
- * the block rather than an in-place pop.
- *
- * Entry uses an overshoot cubic-bezier (final control point > 1) for a
- * spring-like settle at the destination. Exit is the reverse — bubble
- * shrinks back into the block center on collapse. */
-@keyframes bubble-pop-in {
-  from {
-    opacity: 0;
-    transform: translate(var(--enter-dx, 0px), var(--enter-dy, 0px)) scale(0.3);
-  }
-  to {
-    opacity: 1;
-    transform: translate(0, 0) scale(1);
-  }
-}
-@keyframes bubble-pop-out {
-  from {
-    opacity: 1;
-    transform: translate(0, 0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translate(var(--enter-dx, 0px), var(--enter-dy, 0px)) scale(0.3);
-  }
-}
-.bubble-enter {
-  animation: bubble-pop-in 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-.bubble-exit {
-  animation: bubble-pop-out 380ms cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
-}
-
-/* Ambient sector backdrop drawn behind the bubble cluster. Slower and
- * more subtle than the bubble pop so it reads as background context,
- * not a competing focal point. Origin is the SVG center so the scale
- * grows from the block outward. */
-@keyframes bubble-sector-in {
-  from {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-  to {
-    opacity: 0.85;
-    transform: scale(1);
-  }
-}
-@keyframes bubble-sector-out {
-  from {
-    opacity: 0.85;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(0.6);
-  }
-}
-.bubble-sector-enter {
-  animation: bubble-sector-in 520ms ease-out both;
-  transform-origin: center;
-}
-.bubble-sector-exit {
-  animation: bubble-sector-out 360ms ease-in forwards;
-  transform-origin: center;
-}
-
-/* Marching-ants dashed stroke used on edges the user just pulled,
- * before Claude has finished reacting. Animates the stroke offset so
- * the dashes appear to flow in the direction of the arrow. Pair with
- * a dashed strokeDasharray inline on the edge element. */
-@keyframes pending-edge-march {
-  to { stroke-dashoffset: -20; }
-}
-
-.pending-edge {
-  animation: pending-edge-march 0.9s linear infinite;
-}
-
-/* Pulse used on placeholder blocks (the dashed-border "New module…"
- * card) while waiting for Claude to scaffold. Blue rings expand and
- * fade so the block visibly "breathes", making it obvious something
- * is in flight. Mirrors focus-pulse's structure but in #78716C. */
-@keyframes pending-block-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 0 rgba(59, 91, 217, 0.0),
-      0 0 0 6px rgba(59, 91, 217, 0.18);
-  }
-  50% {
-    box-shadow:
-      0 0 0 4px rgba(59, 91, 217, 0.10),
-      0 0 0 12px rgba(59, 91, 217, 0.22);
-  }
-}
-
-.pending-block-pulse {
-  animation: pending-block-pulse 1.6s ease-in-out infinite;
-}
-
-/* Steady-state "just edited" highlight for blocks/arrows after Claude
- * settles. Persists until the user takes their next action — that's
- * dismissRecentEdit on the diagram side. Solid blue ring + tinted
- * background so it's obvious-but-not-jarring; no animation, since the
- * marching-ants already conveyed "in flight" during generate. */
-.recent-change-block {
-  border-color: #3B5BD9 !important;
-  box-shadow:
-    0 0 0 3px rgba(59, 91, 217, 0.20),
-    0 4px 16px rgba(59, 91, 217, 0.14);
-}
-
-/* Recent-change style for an SVG edge path. A freshly connected /
- * edited arrow stays solid BLUE (the "just edited" color, matching the
- * block ring) against the regular grey edges until the user's next
- * action. Solid, not dashed: the edit is finished. */
-.recent-change-edge {
-  stroke: #3B5BD9 !important;
-  stroke-width: 2 !important;
 }
 
 /* Prose styles for markdown rendering */

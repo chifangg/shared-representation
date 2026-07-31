@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useStore } from "@xyflow/react";
 import {
   X,
   Loader2,
-  Pencil,
   ArrowRight,
   Check,
   ChevronRight,
@@ -13,6 +13,12 @@ import {
   previewFunctionChange,
   type FunctionDetailFile,
 } from "../../api/fetchFunctionDetail";
+import {
+  CARD_GAP,
+  CARD_MARGIN,
+  CARD_RESERVE_H,
+  CARD_W,
+} from "../../layout/detailCardLayout";
 
 /**
  * Drill-in edit card for a single function bubble.
@@ -32,11 +38,49 @@ import {
  *
  * This component is read-only against the project: it never writes code
  * itself. All writes go through the parent's dispatch.
+ *
+ * Presentation: the card is PULLED OUT of the bubble. It anchors to the
+ * bubble in flow space (reprojected each transform tick, like the connection
+ * lens), lands beside the bubble on whichever side has room, and a leader line
+ * grows from the bubble's rim to the card's near edge. It waits for `settled`
+ * (the open zoom-out has finished) before it draws, so nothing skates while
+ * the camera is still easing.
  */
 
 type Phase = "loading" | "detail" | "previewing" | "preview" | "error";
 
-const CARD_W = 340;
+/** Card geometry. Imported (never re-declared) so the hook that reframes the
+ *  camera on open and this placement always agree about how much room the
+ *  card needs; local copies drifted apart and broke the outward direction. */
+const GAP = CARD_GAP;
+const MARGIN = CARD_MARGIN;
+/** Cream leader, matching the connection lens. */
+const THREAD = "#CBC1B1";
+
+type Side = "right" | "left" | "top" | "bottom";
+
+/** The card's top-left (pane coords) for a given side of the bubble. Left/right
+ *  sit beside the bubble, centred on it vertically; top/bottom sit above/below,
+ *  centred on it horizontally. Vertical extent uses the reserved height so a
+ *  top card is lifted fully clear before its real height is known. */
+function rectForSide(
+  side: Side,
+  ax: number,
+  ay: number,
+  rp: number,
+  gap: number,
+): { left: number; top: number } {
+  switch (side) {
+    case "right":
+      return { left: ax + rp + gap, top: ay - CARD_RESERVE_H / 2 };
+    case "left":
+      return { left: ax - rp - gap - CARD_W, top: ay - CARD_RESERVE_H / 2 };
+    case "top":
+      return { left: ax - CARD_W / 2, top: ay - rp - gap - CARD_RESERVE_H };
+    case "bottom":
+      return { left: ax - CARD_W / 2, top: ay + rp + gap };
+  }
+}
 
 export function CapabilityDetailCard({
   functionName,
@@ -44,6 +88,7 @@ export function CapabilityDetailCard({
   blockLabel,
   files,
   anchor,
+  settled,
   onClose,
   onConfirm,
 }: {
@@ -51,13 +96,16 @@ export function CapabilityDetailCard({
   displayLabel: string;
   blockLabel: string;
   files: FunctionDetailFile[];
-  anchor: { x: number; y: number };
+  /** Bubble centre + radius in FLOW coords, plus the outward direction the
+   *  card should extend (bubble relative to its block/fan centre). */
+  anchor: { fx: number; fy: number; r: number; dirX: number; dirY: number };
+  /** True once the open zoom-out has settled; the card draws only then. */
+  settled: boolean;
   onClose: () => void;
-  onConfirm: (finalInstruction: string) => void;
+  onConfirm: (finalInstruction: string, summary: string) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [description, setDescription] = useState("");
-  const [originalDescription, setOriginalDescription] = useState("");
   const [behaviors, setBehaviors] = useState<string[]>([]);
   const [instruction, setInstruction] = useState("");
   const [previewSummary, setPreviewSummary] = useState("");
@@ -81,7 +129,6 @@ export function CapabilityDetailCard({
       .then((res) => {
         if (!aliveRef.current) return;
         setDescription(res.description);
-        setOriginalDescription(res.description);
         setBehaviors(res.behaviors);
         setPhase("detail");
       })
@@ -95,20 +142,10 @@ export function CapabilityDetailCard({
     };
   }, [functionName]);
 
-  const descriptionEdited =
-    description.trim() !== originalDescription.trim() && description.trim().length > 0;
-  const canPreview = instruction.trim().length > 0 || descriptionEdited;
-
-  // The plain-language change text, used both for the preview call and
-  // (wrapped with function targeting) for the actual edit dispatch.
-  const changeText = useMemo(() => {
-    const parts: string[] = [];
-    if (instruction.trim()) parts.push(instruction.trim());
-    if (descriptionEdited) {
-      parts.push(`It should now behave as follows: ${description.trim()}`);
-    }
-    return parts.join(" ");
-  }, [instruction, descriptionEdited, description]);
+  // One instruction drives the change. The description above is read-only
+  // context (the current behaviour), not a second, competing way to edit.
+  const changeText = instruction.trim();
+  const canPreview = changeText.length > 0;
 
   const runPreview = () => {
     if (!canPreview) return;
@@ -128,33 +165,195 @@ export function CapabilityDetailCard({
   };
 
   const confirm = () => {
-    const base = originalDescription.trim()
-      ? ` (currently: ${originalDescription.trim()})`
+    const base = description.trim()
+      ? ` (currently: ${description.trim()})`
       : "";
     const finalInstruction =
       `In the block "${blockLabel}", change the function \`${functionName}\`${base}. ` +
       changeText;
-    onConfirm(finalInstruction);
+    // Concise chat summary: lead with what the user asked to change, not the
+    // block/function boilerplate that the full instruction needs for Claude.
+    const summary = changeText || `${displayLabel} behaviour changed`;
+    onConfirm(finalInstruction, summary);
   };
 
-  // Anchor to the click, clamped into the viewport. The card height is
-  // then capped to the space BELOW `top` so it never runs off the bottom
-  // (the preview can grow the body well past its old fixed guess), which
-  // is what hid the Apply button. The body scrolls; the footer stays put.
-  const left = Math.max(
-    16,
-    Math.min(anchor.x + 16, window.innerWidth - CARD_W - 16),
-  );
-  const top = Math.max(16, Math.min(anchor.y - 24, window.innerHeight - 240));
-  const maxHeight = window.innerHeight - top - 16;
+  // ONE transform, from the store, drives the bubble anchor, the card
+  // placement, and the leader, so the card and its line can never drift apart.
+  const tx = useStore((s) => s.transform[0]);
+  const ty = useStore((s) => s.transform[1]);
+  const zoom = useStore((s) => s.transform[2]);
+  const paneW = useStore((s) => s.width);
+  const paneH = useStore((s) => s.height);
+
+  // Bubble centre + radius, flow space -> pane space, reprojected each tick.
+  const ax = anchor.fx * zoom + tx;
+  const ay = anchor.fy * zoom + ty;
+  const rp = anchor.r * zoom;
+
+  // The card's real rendered height, so the leader joins its actual near edge.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [cardH, setCardH] = useState(0);
+  useLayoutEffect(() => {
+    if (cardRef.current) setCardH(cardRef.current.offsetHeight);
+  }, [phase, description, instruction, previewSummary, showBehaviors]);
+
+  // Place the card ONCE, the frame the zoom-out has settled. It extends in the
+  // bubble's OUTWARD direction (following the fan into the space it opened): the
+  // dominant axis of dirX/dirY picks the side. If that side has no room it falls
+  // back to the opposite, then to whichever side is roomiest; the result is
+  // always clamped fully into the pane. Frozen in FLOW coords so it then tracks
+  // the view.
+  const clampX = (l: number) =>
+    Math.min(Math.max(l, MARGIN), Math.max(MARGIN, paneW - CARD_W - MARGIN));
+  const clampY = (t: number) =>
+    Math.min(
+      Math.max(t, MARGIN),
+      Math.max(MARGIN, paneH - CARD_RESERVE_H - MARGIN),
+    );
+  // Fan-bulge gap: the fan bulges along the outward axis further than the
+  // clicked bubble reaches (its neighbours stick out past it), so add that
+  // overshoot to the gap and the card clears the WHOLE fan, not just this
+  // bubble. reach = bubble-to-fan-centre distance; its component off the
+  // outward axis is exactly how far the fan bulges past this bubble.
+  const { dirX, dirY } = anchor;
+  const reach = Math.hypot(dirX, dirY);
+  const axisComp =
+    Math.abs(dirX) >= Math.abs(dirY) ? Math.abs(dirX) : Math.abs(dirY);
+  const egap = GAP + Math.max(0, reach - axisComp) * zoom;
+
+  const placedRef = useRef<{ x: number; y: number; side: Side } | null>(null);
+  if (placedRef.current === null && settled && paneW > 0 && paneH > 0) {
+    // Room from the bubble rim to each pane edge.
+    const room: Record<Side, number> = {
+      right: paneW - (ax + rp),
+      left: ax - rp,
+      top: ay - rp,
+      bottom: paneH - (ay + rp),
+    };
+    const need = {
+      horiz: CARD_W + egap + MARGIN,
+      vert: CARD_RESERVE_H + egap + MARGIN,
+    };
+    const fitsSide = (s: Side) =>
+      s === "right" || s === "left" ? room[s] >= need.horiz : room[s] >= need.vert;
+    // Preferred side from the outward vector's dominant axis.
+    const preferred: Side =
+      Math.abs(dirX) >= Math.abs(dirY)
+        ? dirX >= 0
+          ? "right"
+          : "left"
+        : dirY >= 0
+          ? "bottom"
+          : "top";
+    const opposite: Record<Side, Side> = {
+      right: "left",
+      left: "right",
+      top: "bottom",
+      bottom: "top",
+    };
+    const order: Side[] = [
+      preferred,
+      opposite[preferred],
+      ...(["right", "left", "top", "bottom"] as Side[]).sort(
+        (a, b) => room[b] - room[a],
+      ),
+    ];
+    const side = order.find(fitsSide) ?? order[2];
+    const topLeft = rectForSide(side, ax, ay, rp, egap);
+    placedRef.current = {
+      x: (clampX(topLeft.left) - tx) / zoom,
+      y: (clampY(topLeft.top) - ty) / zoom,
+      side,
+    };
+  }
+  const placed = placedRef.current;
+  const ready = placed !== null;
+  const cardLeft = placed ? placed.x * zoom + tx : ax;
+  const cardTop = placed ? placed.y * zoom + ty : ay;
+  const side: Side = placed?.side ?? "right";
+  const maxHeight = Math.max(220, paneH - cardTop - MARGIN);
+
+  // Leader: from the bubble rim to the card's near edge, meeting it square-on.
+  // For a left/right card that edge is vertical (join at the bubble's height);
+  // for a top/bottom card it is horizontal (join at the bubble's x). The join
+  // is clamped inside the card so it always lands on the edge, not past it.
+  const cardBottom = cardTop + Math.max(80, cardH);
+  let jx: number;
+  let jy: number;
+  if (side === "right") {
+    jx = cardLeft;
+    jy = Math.min(Math.max(ay, cardTop + 20), cardBottom - 20);
+  } else if (side === "left") {
+    jx = cardLeft + CARD_W;
+    jy = Math.min(Math.max(ay, cardTop + 20), cardBottom - 20);
+  } else if (side === "top") {
+    jx = Math.min(Math.max(ax, cardLeft + 20), cardLeft + CARD_W - 20);
+    jy = cardBottom;
+  } else {
+    jx = Math.min(Math.max(ax, cardLeft + 20), cardLeft + CARD_W - 20);
+    jy = cardTop;
+  }
+  const dx = jx - ax;
+  const dy = jy - ay;
+  const len = Math.hypot(dx, dy) || 1;
+  // Start the drawn line at the bubble's rim, not its centre.
+  const sx = ax + (dx / len) * rp;
+  const sy = ay + (dy / len) * rp;
+  const leaderPath = `M ${sx},${sy} L ${jx},${jy}`;
+  const cardOrigin =
+    side === "right"
+      ? "left center"
+      : side === "left"
+        ? "right center"
+        : side === "top"
+          ? "center bottom"
+          : "center top";
 
   return (
     <>
-      {/* Transparent dismiss layer. */}
-      <div className="fixed inset-0 z-40" onClick={onClose} />
+      {/* Transparent dismiss layer, over the diagram pane only. */}
+      <div className="absolute inset-0 z-40" onClick={onClose} />
+
+      {/* Leader: one cream line from the bubble to the card. Hidden until the
+       *  placement is known, so it never flashes at a stale spot. */}
+      {ready && (
+        <svg
+          className="pointer-events-none absolute inset-0 z-50 h-full w-full"
+          aria-hidden="true"
+        >
+          <path
+            className="annot-leader-path"
+            d={leaderPath}
+            pathLength={1}
+            fill="none"
+            stroke={THREAD}
+            strokeWidth={1.2}
+            strokeLinecap="round"
+          />
+          <circle
+            className="annot-leader-dot"
+            cx={sx}
+            cy={sy}
+            r={3}
+            fill={THREAD}
+          />
+        </svg>
+      )}
+
       <div
-        className="fixed z-50 flex flex-col rounded-xl border border-[#E7E2DA] bg-[#FCFBF9] shadow-xl"
-        style={{ left, top, width: CARD_W, maxHeight }}
+        ref={cardRef}
+        className={`glass-card absolute z-50 flex flex-col rounded-2xl ${
+          ready ? "bubble-card-in" : ""
+        }`}
+        style={{
+          left: cardLeft,
+          top: cardTop,
+          width: CARD_W,
+          maxHeight,
+          transformOrigin: cardOrigin,
+          opacity: ready ? undefined : 0,
+          pointerEvents: ready ? undefined : "none",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -176,17 +375,17 @@ export function CapabilityDetailCard({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
           {phase === "loading" && (
-            <div className="flex items-center gap-2 py-6 text-sm text-[#777]">
+            <div className="flex items-center gap-2 py-6 text-sm text-[#8A8276]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Reading this function...
+              Reading this capability…
             </div>
           )}
 
           {phase === "error" && (
             <div className="py-3 text-sm text-[#A66B49]">
-              {error || "Could not read this function."}
+              {error || "Could not read this capability."}
             </div>
           )}
 
@@ -194,24 +393,17 @@ export function CapabilityDetailCard({
             phase === "previewing" ||
             phase === "preview") && (
             <>
-              {/* Plain-language description (editable = the pen). Kept to
-                  one short line by default; the canvas stays light on text. */}
-              <label className="mb-1 flex items-center gap-1 text-[11px] font-medium text-[#888]">
-                <Pencil className="h-3 w-3" />
-                What this does
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={2}
-                className="w-full resize-none rounded-lg border border-[#E7E2DA] bg-white px-2.5 py-2 text-sm leading-snug text-[#2A2622] outline-none focus:border-[#C9B58E]"
-              />
+              {/* What it does: read-only PROSE, not a field. This is context to
+                  read, not a second thing to edit. */}
+              <p className="text-[13.5px] leading-[1.55] text-[#3A352E]">
+                {description}
+              </p>
 
               {behaviors.length > 0 && (
-                <div className="mt-1.5">
+                <div className="mt-2.5">
                   <button
                     onClick={() => setShowBehaviors((v) => !v)}
-                    className="flex items-center gap-1 text-[11px] text-[#999] transition-colors hover:text-[#666]"
+                    className="flex items-center gap-1 text-[11.5px] text-[#A3A29D] transition-colors hover:text-[#6B6256]"
                   >
                     {showBehaviors ? (
                       <ChevronDown className="h-3 w-3" />
@@ -221,13 +413,12 @@ export function CapabilityDetailCard({
                     {showBehaviors ? "Hide details" : `Details (${behaviors.length})`}
                   </button>
                   {showBehaviors && (
-                    <ul className="mt-1 space-y-1">
+                    <ul className="mt-1.5 space-y-1.5 border-l border-[#EDE7DC] pl-3">
                       {behaviors.map((b, i) => (
                         <li
                           key={i}
-                          className="flex gap-1.5 text-[12px] leading-snug text-[#666]"
+                          className="text-[12px] leading-snug text-[#8A8276]"
                         >
-                          <span className="mt-[3px] h-1 w-1 shrink-0 rounded-full bg-[#B8995A]" />
                           {b}
                         </li>
                       ))}
@@ -236,17 +427,31 @@ export function CapabilityDetailCard({
                 </div>
               )}
 
-              {/* Instruction box. */}
-              <label className="mb-1 mt-4 block text-[11px] font-medium text-[#888]">
-                What do you want to change?
-              </label>
-              <textarea
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                rows={2}
-                placeholder="e.g. retry up to 3 times if it fails"
-                className="w-full resize-none rounded-lg border border-[#E7E2DA] bg-white px-2.5 py-2 text-sm text-[#2A2622] outline-none placeholder:text-[#B5AFA4] focus:border-[#C9B58E]"
-              />
+              {/* The one action: describe the change. Divider sets it apart from
+                  the read-only context above. */}
+              <div className="mt-4 border-t border-[#EFEAE2] pt-3.5">
+                <label className="mb-1.5 block text-[12px] font-medium text-[#6B6256]">
+                  What you want to change
+                </label>
+                <textarea
+                  autoFocus
+                  value={instruction}
+                  onChange={(e) => setInstruction(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === "Enter" &&
+                      (e.metaKey || e.ctrlKey) &&
+                      canPreview
+                    ) {
+                      e.preventDefault();
+                      runPreview();
+                    }
+                  }}
+                  rows={2}
+                  placeholder="Describe the change…"
+                  className="w-full resize-none rounded-lg border border-[#E7E2DA] bg-white px-3 py-2.5 text-[13px] leading-snug text-[#2A2622] outline-none transition-colors placeholder:text-[#B5AFA4] focus:border-[#C9B58E]"
+                />
+              </div>
 
               {error && phase !== "preview" && (
                 <div className="mt-2 text-[12px] text-[#A66B49]">{error}</div>
@@ -255,7 +460,7 @@ export function CapabilityDetailCard({
               {/* Preview block. */}
               {phase === "preview" && (
                 <div className="mt-3 rounded-lg border border-[#E3DCC9] bg-[#F7F2E6] px-3 py-2.5">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#A0894F]">
+                  <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[#A0894F]">
                     After this change
                   </div>
                   <div className="text-[13px] leading-snug text-[#4A4234]">
@@ -272,7 +477,7 @@ export function CapabilityDetailCard({
           phase === "previewing" ||
           phase === "preview" ||
           phase === "error") && (
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[#EFEAE2] px-4 py-2.5">
+          <div className="flex shrink-0 items-center justify-end gap-2 px-4 pb-3 pt-1">
             {phase === "preview" ? (
               <>
                 <button

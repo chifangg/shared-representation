@@ -66,10 +66,15 @@ features/diagram/
     useAdaptiveFocus.ts           debounced focus delta on each user turn
     useChatSettleEffect.ts        the 280-line settle effect (arrow outcomes,
                                   block/new-block commits, auto-regen, edit summary)
-    useRecentChanges.ts           diff-on-ready + glow state
+    useRecentChanges.ts           diff-on-ready glow + the per-regen structural
+                                  delta (added/removed blocks + arrows) that
+                                  feeds the interaction tracker via onDelta
     useEditSummary.ts             toast state slot
     useCanvasFit.ts               3 fitView effects + ResizeObserver
     useViewportFocusFit.ts        camera pan on focus delta
+    useInteractionTracker.ts      ordered list of agent diagram changes +
+                                  which step is being traced back
+    useTraceFit.ts                camera pan to a traced step's block(s)
 
   components/
     DiagramCanvas.tsx             ReactFlowProvider wrapper + DiagramCanvasInner
@@ -90,6 +95,10 @@ features/diagram/
                                   corner when open). The "Add block" button
                                   lives above the legend, passed as
                                   ColorSchemeLegend's topAccessory.
+      TrackerButton.tsx           header-right pill (+ step badge) that opens
+                                  the interaction tracker.
+      TrackerTray.tsx             dropdown list of agent-driven diagram
+                                  changes; click a row to trace it back.
     panel/
       DiagramFocusPanel.tsx       side panel: open for all of focus mode.
                                   Welcome invite when nothing's prompted yet,

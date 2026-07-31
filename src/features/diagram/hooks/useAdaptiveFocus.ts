@@ -10,6 +10,7 @@ import type {
 import { buildProjectContext } from "../api/buildProjectContext";
 import { buildChatContext } from "../api/buildChatContext";
 import { fetchFocusStream } from "../api/fetchFocus";
+import { isUserPrompt } from "../util/chatEdits";
 
 export type FocusState = {
   ids: string[];
@@ -66,6 +67,14 @@ export function useAdaptiveFocus({
     chatMessagesRef.current = chatMessages;
   }, [chatMessages]);
 
+  // Files change on every agent write mid-turn. Read them through a ref so
+  // a `write_project_file` during the round does NOT re-fire this effect
+  // (which would abort the in-flight focus fetch and leave the panel empty).
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
   // Reset on user-initiated project change.
   useEffect(() => {
     setFocused(null);
@@ -74,16 +83,18 @@ export function useAdaptiveFocus({
   }, [projectKey]);
 
   // Count completed user turns. A turn increment signals "user just
-  // sent a new message", which is the cue to refocus.
+  // sent a new message", which is the cue to refocus. Tool-result
+  // round-trips (also role:user) are excluded, so the round is driven by
+  // the user's prompt / executed edit, not by the agent's mid-turn output.
   const userMessageCount = chatMessages.reduce(
-    (n, m) => n + ((m as { type?: string }).type === "user" ? 1 : 0),
+    (n, m) => n + (isUserPrompt(m) ? 1 : 0),
     0,
   );
   const lastUserCountRef = useRef(0);
   useEffect(() => {
     if (view !== "focus") return;
     if (state.kind !== "ready") return;
-    if (files.length === 0) return;
+    if (filesRef.current.length === 0) return;
     if (userMessageCount === lastUserCountRef.current) return;
     lastUserCountRef.current = userMessageCount;
     if (userMessageCount === 0) return;
@@ -100,7 +111,7 @@ export function useAdaptiveFocus({
 
     const controller = new AbortController();
     const debounceTimer = window.setTimeout(() => {
-      const projectContext = buildProjectContext(files, null);
+      const projectContext = buildProjectContext(filesRef.current, null);
       const chatContext = buildChatContext(chatMessagesRef.current, 3);
       const baseSchemaJson = JSON.stringify({
         blocks: state.schema.blocks.map((b) => ({
@@ -109,6 +120,7 @@ export function useAdaptiveFocus({
           caption: b.caption,
         })),
       });
+      const canvasIds = new Set(state.schema.blocks.map((b) => b.id));
 
       const newDetailBlocks: DiagramBlock[] = [];
       const newDetailArrows: DiagramArrow[] = [];
@@ -123,7 +135,12 @@ export function useAdaptiveFocus({
             signal: controller.signal,
             onEvent: (evt) => {
               if (evt.kind === "focus") {
-                newFocusedIds.push(...evt.ids);
+                // Dedup: a re-emitted / duplicate focus event must not append
+                // repeats. Duplicates would change focused.ids identity (which
+                // resets the mini-graph's drags) and collide ghost-node keys.
+                for (const id of evt.ids) {
+                  if (!newFocusedIds.includes(id)) newFocusedIds.push(id);
+                }
                 // Commit the highlighted ids right away so the panel
                 // header names what it is focusing on during loading.
                 setFocused({
@@ -132,7 +149,22 @@ export function useAdaptiveFocus({
                   arrows: [...newDetailArrows],
                 });
               } else if (evt.kind === "detail_block") {
-                newDetailBlocks.push(evt.data);
+                // Best-effort repair of the parent link before it enters
+                // state: the model sometimes emits the parent's LABEL
+                // instead of its id, or an id that does not exist. The
+                // parent is a detail's ONLY tie back to the canvas
+                // (detail arrows are detail-to-detail by design), so an
+                // unresolved parent leaves the block floating in the mini
+                // graph and islanded if promoted.
+                const block = { ...evt.data };
+                if (block.parent && !canvasIds.has(block.parent)) {
+                  const wanted = String(block.parent).trim().toLowerCase();
+                  const byLabel = state.schema.blocks.find(
+                    (b) => b.label.toLowerCase() === wanted,
+                  );
+                  block.parent = byLabel ? byLabel.id : null;
+                }
+                newDetailBlocks.push(block);
                 setFocused({
                   ids: [...newFocusedIds],
                   blocks: [...newDetailBlocks],
@@ -178,8 +210,9 @@ export function useAdaptiveFocus({
       // leave the panel stuck in its loading state.
       setRegenerating(false);
     };
+    // files is read via filesRef so mid-turn writes don't re-fire / abort.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userMessageCount, view, files.length]);
+  }, [userMessageCount, view]);
 
   return { focused, regenerating, emptyRound };
 }

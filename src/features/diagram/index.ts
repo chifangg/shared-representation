@@ -6,12 +6,19 @@
  * barrel narrow so the chat side can't reach into rendering internals.
  */
 
+// Feature-scoped styles (canvas nodes, overlays, panel, survey). Importing
+// here guarantees Vite bundles them whenever the feature's code loads.
+import "./diagram.css";
+
 // Components rendered by AppShell.
 export { DiagramCanvas } from "./components/DiagramCanvas";
 
-// Provider mounted by App.tsx and the subscribe hook ChatView uses
-// to receive the diagram's visual-edit prompts.
-export { DiagramBusProvider, useDiagramBusSubscribe } from "./protocol/bus";
+// Provider mounted by App.tsx.
+export { DiagramBusProvider } from "./protocol/bus";
+
+// Chat-side hook ChatView mounts to receive the diagram's visual-edit
+// prompts (with the mid-turn queue/flush policy).
+export { useVisualEditSend } from "./hooks/useVisualEditSend";
 
 // Sentinel parsers used by ChatView to render diagram-edit user bubbles
 // and to pair an assistant turn's options block to its EditTarget.

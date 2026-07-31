@@ -210,38 +210,64 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setProjectKey((k) => k + 1);
   }, []);
 
+  // Memoized: an inline object literal here is a NEW value on every provider
+  // render, which invalidates every consumer of this context (the canvas, the
+  // chat, the shell) even when nothing they read actually changed.
+  const value = useMemo(
+    () => ({
+      files,
+      openPaths,
+      activePath,
+      activeFile,
+      highlightEnabled,
+      loadFiles,
+      openFile,
+      setActive,
+      closeFile,
+      updateFileContent,
+      goal,
+      setGoal,
+      chatTheme,
+      setChatTheme,
+      toggleHighlight,
+      reset,
+      uploading,
+      setUploading,
+      uploadProgress,
+      setUploadProgress,
+      chatMessages,
+      setChatMessages,
+      chatRunning,
+      setChatRunning,
+      projectKey,
+    }),
+    [
+      files,
+      openPaths,
+      activePath,
+      activeFile,
+      highlightEnabled,
+      loadFiles,
+      openFile,
+      setActive,
+      closeFile,
+      updateFileContent,
+      goal,
+      setGoal,
+      chatTheme,
+      setChatTheme,
+      toggleHighlight,
+      reset,
+      uploading,
+      uploadProgress,
+      chatMessages,
+      chatRunning,
+      projectKey,
+    ],
+  );
+
   return (
-    <ProjectContext.Provider
-      value={{
-        files,
-        openPaths,
-        activePath,
-        activeFile,
-        highlightEnabled,
-        loadFiles,
-        openFile,
-        setActive,
-        closeFile,
-        updateFileContent,
-        goal,
-        setGoal,
-        chatTheme,
-        setChatTheme,
-        toggleHighlight,
-        reset,
-        uploading,
-        setUploading,
-        uploadProgress,
-        setUploadProgress,
-        chatMessages,
-        setChatMessages,
-        chatRunning,
-        setChatRunning,
-        projectKey,
-      }}
-    >
-      {children}
-    </ProjectContext.Provider>
+    <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
   );
 }
 
@@ -408,7 +434,7 @@ export function buildTree(files: FileEntry[]): TreeNode[] {
 
 // --- components ------------------------------------------------------------
 
-export function UploadArea() {
+export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
   const { loadFiles, uploading, setUploading, setUploadProgress } =
     useProject();
 
@@ -442,8 +468,16 @@ export function UploadArea() {
   };
 
   return (
-    <div className="flex flex-col items-center gap-3 px-3 py-6 text-xs">
-      <UploadButton icon={<FolderOpen size={14} />} label={uploading ? "Loading…" : "upload folder"}>
+    <div
+      className={
+        compact ? "flex flex-col items-center gap-1 pt-2" : "flex flex-col text-xs"
+      }
+    >
+      <UploadButton
+        compact={compact}
+        icon={<FolderOpen size={compact ? 16 : 14} />}
+        label={uploading ? "Loading…" : "open folder"}
+      >
         <input
           type="file"
           // @ts-expect-error webkitdirectory is non-standard but widely supported
@@ -455,7 +489,16 @@ export function UploadArea() {
           disabled={uploading}
         />
       </UploadButton>
-      <UploadButton icon={<FileArchive size={14} />} label={uploading ? "Loading…" : "upload .zip"}>
+      {/* Hairline separates the two actions now that neither carries a
+          border of its own. Inset so it reads as a rule inside the list,
+          not an edge of the panel. Not needed in the rail, where they are
+          two spaced icons. */}
+      {!compact && <div className="mx-3 h-px bg-[#E4E3DF]" />}
+      <UploadButton
+        compact={compact}
+        icon={<FileArchive size={compact ? 16 : 14} />}
+        label={uploading ? "Loading…" : "open .zip"}
+      >
         <input
           type="file"
           accept=".zip,application/zip,application/x-zip-compressed"
@@ -505,30 +548,46 @@ export function UploadOverlay() {
  * Hover brightens the gradient; press inverts the shadow + nudges
  * down 1px so it feels mechanical.
  */
+// Quiet by default: no fill, no border, no shadow, so it sits flush with the
+// panel and only the label reads. The affordance appears on hover as a soft
+// darkening of the surface. Uses a black alpha rather than a fixed hex so it
+// stays correct whatever the panel colour becomes.
 const PILL_BUTTON =
-  "rounded-full px-4 py-1.5 text-xs font-medium text-[#484848] " +
-  "bg-gradient-to-b from-[#D5D5D5] to-[#B5B5B5] " +
-  "shadow-[inset_0_1px_0_rgb(255_255_255_/_0.6),0_1px_3px_rgb(0_0_0_/_0.18)] " +
-  "transition-all duration-150 " +
-  "hover:from-[#E0E0E0] hover:to-[#C0C0C0] " +
-  "hover:shadow-[inset_0_1px_0_rgb(255_255_255_/_0.6),0_2px_5px_rgb(0_0_0_/_0.22)] " +
-  "active:translate-y-px active:from-[#B0B0B0] active:to-[#A0A0A0] " +
-  "active:shadow-[inset_0_1px_2px_rgb(0_0_0_/_0.2)]";
+  "px-3 py-2 text-[12px] font-medium leading-none text-[#3A3A38] " +
+  "transition-colors duration-150 " +
+  "hover:bg-black/[0.06] " +
+  "active:bg-black/[0.10]";
 
 function UploadButton({
   icon,
   label,
   children,
+  compact = false,
 }: {
   icon: ReactNode;
   label: string;
   children: ReactNode;
+  /** Rail mode: icon only, label moves to the tooltip. */
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <label
+        title={label}
+        className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-[#3A3A38] transition-colors hover:bg-black/[0.06]"
+      >
+        {icon}
+        {children}
+      </label>
+    );
+  }
   return (
     <label
-      className={`${PILL_BUTTON} flex w-36 cursor-pointer items-center justify-center gap-2 whitespace-nowrap`}
+      className={`${PILL_BUTTON} flex w-full cursor-pointer items-center justify-start gap-2 whitespace-nowrap`}
     >
-      {icon}
+      {/* Icon sits a step back from the label so the pair reads as one
+          designed unit rather than two equal-weight marks. */}
+      <span className="flex shrink-0 items-center text-[#9A9993]">{icon}</span>
       <span>{label}</span>
       {children}
     </label>
@@ -542,7 +601,7 @@ export function FileTree() {
   if (files.length === 0) return null;
 
   return (
-    <div className="flex h-full flex-col text-sm text-white">
+    <div className="flex h-full flex-col text-sm text-[#3A352E]">
       <div className="min-h-0 flex-1 overflow-auto px-1 py-2">
         {tree.map((node) => (
           <TreeNodeView
@@ -554,8 +613,8 @@ export function FileTree() {
           />
         ))}
       </div>
-      <div className="bg-[#989898]/80 p-2">
-        <button onClick={reset} className={`${PILL_BUTTON} w-full`}>
+      <div className="border-t border-[#DEDCD7] p-2">
+        <button onClick={reset} className={`${PILL_BUTTON} w-full text-left`}>
           clear files and re-upload
         </button>
       </div>
@@ -587,7 +646,7 @@ function TreeNodeView({
             });
             setExpanded(!expanded);
           }}
-          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-white/10"
+          className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-black/[0.05]"
           style={{ paddingLeft: depth * 12 + 4 }}
         >
           <ChevronRight
@@ -618,7 +677,7 @@ function TreeNodeView({
     <button
       onClick={() => onSelect(node.path)}
       className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left ${
-        isSelected ? "bg-white/20" : "hover:bg-white/10"
+        isSelected ? "bg-[#E4E3DF]" : "hover:bg-black/[0.05]"
       }`}
       style={{ paddingLeft: depth * 12 + 17 }}
     >
@@ -734,39 +793,46 @@ export function buildChatSystemPrompt(
  */
 export function CodeViewer() {
   const { activeFile, highlightEnabled, updateFileContent } = useProject();
+  // One code-edit log per typing burst; raw keystrokes are noise.
+  const codeEditLogTimer = useRef<number | null>(null);
+  const code = activeFile?.content ?? "";
+  const lang = languageFromPath(activeFile?.path ?? "");
+
+  // Tokenizing a whole file is expensive, and `Editor` calls `highlight` on
+  // EVERY render, including every frame of a panel drag. Memoize the rendered
+  // tokens against the content so a resize reuses them instead of
+  // re-highlighting the file. These hooks also have to sit above the early
+  // return below, which they previously did not.
+  const highlighted = useMemo(() => {
+    if (!highlightEnabled) return code;
+    return (
+      <Highlight code={code} language={lang} theme={themes.github}>
+        {({ tokens, getLineProps, getTokenProps }) => (
+          <>
+            {tokens.map((line, i) => (
+              <div key={i} {...getLineProps({ line })}>
+                {line.map((token, key) => (
+                  <span key={key} {...getTokenProps({ token })} />
+                ))}
+              </div>
+            ))}
+          </>
+        )}
+      </Highlight>
+    );
+  }, [code, lang, highlightEnabled]);
+  const highlight = useCallback(() => highlighted, [highlighted]);
 
   if (!activeFile) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-white/70">
+      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-[#8A8175]">
         Select a file from the Files panel
       </div>
     );
   }
 
-  // One code-edit log per typing burst; raw keystrokes are noise.
-  const codeEditLogTimer = useRef<number | null>(null);
-  const lang = languageFromPath(activeFile.path);
-
-  const highlight = highlightEnabled
-    ? (code: string) => (
-        <Highlight code={code} language={lang} theme={themes.vsDark}>
-          {({ tokens, getLineProps, getTokenProps }) => (
-            <>
-              {tokens.map((line, i) => (
-                <div key={i} {...getLineProps({ line })}>
-                  {line.map((token, key) => (
-                    <span key={key} {...getTokenProps({ token })} />
-                  ))}
-                </div>
-              ))}
-            </>
-          )}
-        </Highlight>
-      )
-    : (code: string) => code;
-
   return (
-    <div className="h-full overflow-auto">
+    <div className="h-full overflow-auto bg-[#FAFAF9]">
       <Editor
         value={activeFile.content}
         onValueChange={(value) => {
@@ -790,8 +856,8 @@ export function CodeViewer() {
           fontSize: 12,
           lineHeight: 1.65,
           minHeight: "100%",
-          color: "#fff",
-          caretColor: "#fff",
+          color: "#3A352E",
+          caretColor: "#3A352E",
         }}
       />
     </div>
@@ -808,7 +874,7 @@ export function CodeTabs() {
 
   if (openPaths.length === 0) {
     return (
-      <div className="flex h-full flex-1 items-center px-3 text-sm text-white/60">
+      <div className="flex h-full flex-1 items-center px-3 text-sm text-[#8A8175]">
         no file open
       </div>
     );
@@ -831,15 +897,15 @@ export function CodeTabs() {
             title={path}
             className={`group flex h-9 max-w-44 shrink-0 items-center gap-2 rounded-t-md px-4 text-sm ${
               isActive
-                ? "bg-[#292929] text-white"
-                : "bg-[#7a7a7a] text-white/70 hover:bg-[#909090] hover:text-white"
+                ? "bg-[#FAFAF9] text-[#2B2B29]"
+                : "bg-[#E0DFDB] text-[#6E6D68] hover:bg-[#EAE9E6] hover:text-[#2B2B29]"
             }`}
           >
             <span className="truncate">{name}</span>
             <span
               role="button"
               onClick={onClose}
-              className="-mr-1.5 flex h-5 w-5 items-center justify-center rounded text-white/60 hover:bg-white/15 hover:text-white"
+              className="-mr-1.5 flex h-5 w-5 items-center justify-center rounded text-[#8A8175] hover:bg-black/[0.08] hover:text-[#3A352E]"
             >
               <X size={13} />
             </span>
@@ -862,8 +928,8 @@ export function HighlightToggle() {
       }
       className={`flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors ${
         highlightEnabled
-          ? "bg-white/15 text-white"
-          : "text-white/60 hover:bg-white/10 hover:text-white"
+          ? "bg-black/[0.06] text-[#3A352E]"
+          : "text-[#8A8175] hover:bg-black/[0.05] hover:text-[#3A352E]"
       }`}
     >
       <Palette size={14} />

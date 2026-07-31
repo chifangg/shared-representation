@@ -11,6 +11,7 @@ import type {
   ArrowsAddedDetail,
   ConnectionLensDetail,
   OptionExecutedDetail,
+  OptionsCancelledDetail,
   OptionsReadyDetail,
   VisualEditDetail,
 } from "../types";
@@ -39,6 +40,14 @@ export type DiagramBusMessageMap = {
    * serialized target; this event populates that ref.
    */
   "option-executed": OptionExecutedDetail;
+
+  /**
+   * Diagram → ChatView (intra-transcript). The user closed the cards
+   * overlay WITHOUT picking anything. The chat's "N suggestions ready
+   * on the canvas" chip flips to its dismissed state, so scrolling back
+   * later cannot read as if the suggestions were still waiting.
+   */
+  "options-cancelled": OptionsCancelledDetail;
 
   /**
    * ChatView → Diagram. Once the assistant turn has a trailing

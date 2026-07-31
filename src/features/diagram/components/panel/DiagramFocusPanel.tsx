@@ -68,16 +68,31 @@ export function DiagramFocusPanel({
       e.preventDefault();
       const startX = e.clientX;
       const startW = width;
+      // Coalesce to ONE state update per animation frame. Pointer devices
+      // fire far faster than the display refreshes, and each update re-renders
+      // the panel (whose mini-graph relays out), so committing every raw event
+      // queues more work than the frame can drain and the drag falls behind.
+      let raf = 0;
+      let pending = startW;
       const onMove = (ev: MouseEvent) => {
         const dx = startX - ev.clientX; // dragging left grows panel
-        const next = Math.min(PANEL_MAX, Math.max(PANEL_MIN, startW + dx));
-        onWidthChange(next);
+        pending = Math.min(PANEL_MAX, Math.max(PANEL_MIN, startW + dx));
+        if (raf) return;
+        raf = window.requestAnimationFrame(() => {
+          raf = 0;
+          onWidthChange(pending);
+        });
       };
       const onUp = () => {
+        if (raf) {
+          window.cancelAnimationFrame(raf);
+          raf = 0;
+        }
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        onWidthChange(pending); // commit the final position
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);

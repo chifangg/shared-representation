@@ -1,0 +1,675 @@
+/* ---------------------------------------------------------------------------
+   Styles for the diagram feature. Every rule in this file is referenced only
+   by components and hooks under src/features/diagram/ (canvas nodes and
+   edges, React Flow layers, overlays, the focus panel, and the onboarding
+   survey). It is imported from the feature barrel (index.ts), so Vite
+   bundles it whenever the feature's code loads. App-wide styles (reset,
+   theme tokens, chat input, prose, scrollbars) live in src/styles.css.
+   --------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Connection lens as a margin annotation: a leader line drawn from the arrow's
+   pill out to writing placed ON the canvas. Not a panel, so there is no border
+   and no shadow anywhere here; legibility comes from a feathered paper halo.
+   --------------------------------------------------------------------------- */
+
+/* Length-independent draw-on, thanks to pathLength="1" on the path. */
+@keyframes annot-leader-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.annot-leader-path {
+  stroke-dasharray: 1;
+  animation: annot-leader-draw 260ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes annot-dot-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.annot-leader-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: annot-dot-in 180ms ease-out both;
+}
+
+/* The writing appears only after the line has reached the page. */
+@keyframes annot-note-in {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.margin-note {
+  position: relative;
+  isolation: isolate;
+  animation: annot-note-in 220ms ease-out 140ms both;
+}
+/* Feathered halo: enough to keep ink readable over gray arrows and tinted
+   blocks, soft enough that it never reads as a card edge. */
+.margin-note.note-halo::before {
+  content: "";
+  position: absolute;
+  inset: -12px -16px;
+  z-index: -1;
+  border-radius: 16px;
+  background: #fcfbf9;
+  opacity: 0.92;
+  filter: blur(7px);
+}
+
+/* Uses tokens: a hairline under the word, never a boxed chip. */
+.annot-use {
+  font-style: normal;
+  border-bottom: 1px solid #e7e2da;
+}
+
+/* Bubble drill-in card: once the leader has reached out from the bubble, the
+   card grows in from the side the leader meets (transform-origin is set inline,
+   left or right). The delay lets the 260ms leader draw land first, so it reads
+   as the card being pulled out on the line rather than both at once. */
+@keyframes bubble-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.bubble-card-in {
+  /* Bigger scale-up with a slight overshoot so it clearly "grows" out of the
+     bubble along the leader, rather than just fading in. */
+  animation: bubble-card-in 300ms cubic-bezier(0.34, 1.3, 0.5, 1) 150ms both;
+}
+
+/* Intent gate (add-module / block-action / new-connection): the backdrop
+   fades and the card rises + scales in, so it arrives rather than snapping. */
+@keyframes gate-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes gate-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.gate-backdrop {
+  animation: gate-backdrop-in 160ms ease-out both;
+}
+.gate-card {
+  animation: gate-card-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Exit: the ink retracts back along the leader while the writing fades, so
+   dismissing reads as the annotation being taken away rather than cut. */
+@keyframes annot-leader-undraw {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 1;
+  }
+}
+.annot-leader-path-out {
+  stroke-dasharray: 1;
+  animation: annot-leader-undraw 160ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation-delay: 60ms;
+}
+@keyframes annot-dot-out {
+  to {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+.annot-leader-dot-out {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: annot-dot-out 140ms ease-in 80ms forwards;
+}
+@keyframes annot-note-out {
+  to {
+    opacity: 0;
+    transform: translateX(3px);
+  }
+}
+.margin-note-out {
+  animation: annot-note-out 140ms ease-in forwards;
+}
+
+/* Loading: short bars standing in for the sentence about to be written, each
+   breathing slightly out of phase so it reads as ink arriving. */
+@keyframes annot-skeleton {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+.annot-skeleton-bar {
+  height: 7px;
+  border-radius: 3px;
+  background: #c6bfb2;
+  animation: annot-skeleton 1.25s ease-in-out infinite;
+}
+
+@keyframes block-grow {
+  from {
+    opacity: 0;
+    transform: scale(0.6) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.block-node-grow {
+  animation: block-grow 380ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  transform-origin: center center;
+}
+
+.react-flow__node {
+  transition: transform 350ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.react-flow__node.dragging,
+.react-flow__node.selected.dragging {
+  transition: none;
+}
+
+.react-flow__node.selected {
+  z-index: 10 !important;
+}
+
+/* Edge-label pills must sit ABOVE blocks. React Flow renders the
+ * edge-label layer BELOW the node layer by default, so a pill that
+ * grazes a block's edge gets clipped behind it and reads as a label
+ * floating out of nowhere. Lifting the whole layer keeps every pill
+ * fully visible and clickable on top of the blocks it sits near. */
+.react-flow__edgelabel-renderer {
+  z-index: 11;
+}
+
+@keyframes loading-bar {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(150%); }
+  100% { transform: translateX(-100%); }
+}
+
+@keyframes panel-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+.panel-slide-in {
+  animation: panel-slide-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes focus-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgba(245, 158, 11, 0.0),
+      0 0 0 6px rgba(245, 158, 11, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px rgba(245, 158, 11, 0.10),
+      0 0 0 10px rgba(245, 158, 11, 0.22);
+  }
+}
+
+.focus-pulse {
+  animation: focus-pulse 1.6s ease-in-out infinite;
+}
+
+/* Inline chat record of an agent diagram action. Flashes a brief blue
+   ring on mount (synced with the canvas block glow), then settles to the
+   recessed sand "record" shadow. `forwards` holds the resting state. */
+@keyframes diagram-action-in {
+  0% {
+    box-shadow: 0 0 0 3px rgba(59, 91, 217, 0);
+  }
+  18% {
+    box-shadow: 0 0 0 3px rgba(59, 91, 217, 0.3);
+  }
+  100% {
+    box-shadow:
+      inset 0 2px 5px rgba(120, 98, 55, 0.22),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.55);
+  }
+}
+
+.diagram-action-in {
+  animation: diagram-action-in 1.8s ease-out forwards;
+}
+
+/* Frosted-glass surface for canvas overlays (bubble detail card, tracker
+   tray). Written as one class rather than utilities because the effect needs
+   all four parts together: a genuinely translucent fill so the diagram shows
+   through, a strong blur + saturate so what shows through reads as frosted
+   rather than merely faded, a bright hairline border, and an inset top
+   highlight for the lit glass edge. Tuned so body text stays readable even
+   when the card lands over a tinted block. */
+.glass-card {
+  background-color: rgba(253, 252, 249, 0.62);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    0 20px 60px -16px rgba(41, 36, 32, 0.28);
+}
+/* Browsers without backdrop-filter would show the fill as plain wash, which
+   is too thin to read against. Give those an opaque surface instead. */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-card {
+    background-color: #fbfaf6;
+  }
+}
+
+/* Interaction-tracker card strip. The strip scrolls horizontally; the cards
+   themselves stay a fixed width so the row reads as an even filmstrip. */
+.trk-strip {
+  scrollbar-width: thin;
+  scrollbar-color: #d8d2c6 transparent;
+}
+.trk-strip::-webkit-scrollbar {
+  height: 6px;
+}
+.trk-strip::-webkit-scrollbar-track {
+  background: transparent;
+}
+.trk-strip::-webkit-scrollbar-thumb {
+  background: #d8d2c6;
+  border-radius: 3px;
+}
+/* Block names are often long and the cards are slim: names stay on ONE line
+   and, when they overflow, loop sideways (see MarqueeName in TrackerTray).
+   The wrapper only clips; the travel lives on .trk-marquee inside it. */
+.trk-names {
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* The looping track: two copies of the name ride it a fixed gap apart, and
+   one cycle travels exactly one copy's width (--trk-marquee-dist), so the
+   restart lands on an identical frame and the ride reads as one continuous
+   unbroken loop.
+   The loop runs ONLY under the pointer: every card looping at once made
+   the whole tray shimmer. At rest the name sits clipped, with a right-edge
+   fade (below) hinting there is more. */
+.trk-marquee {
+  display: inline-flex;
+}
+.trk-card:hover .trk-marquee,
+.trk-card:focus-visible .trk-marquee {
+  animation: trk-marquee var(--trk-marquee-dur, 8s) linear infinite;
+}
+/* Fade-out at the clipped edge of an overflowing name, so truncation reads
+   as "continues" rather than "ends in mid-word". */
+.trk-names-clip {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 14px),
+    transparent
+  );
+  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
+}
+@keyframes trk-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-1 * var(--trk-marquee-dist, 0px)));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trk-marquee {
+    animation: none;
+  }
+}
+/* Lift the hovered card slightly so the strip responds to the pointer. */
+.trk-card {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button.trk-card:hover {
+  transform: translateY(-2px);
+}
+/* Tracker dropdown entrance: drops down a few px + fades in, so it reads as
+   unfurling from the button it hangs off rather than just appearing. */
+.trk-drop {
+  animation: trk-drop 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes trk-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* The notch is a 45deg-rotated square, so its entrance keyframe must carry
+   the rotation (a plain translate would flatten it back to an axis-aligned
+   square). Drops in together with the tray. */
+.trk-notch {
+  animation: trk-notch-drop 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes trk-notch-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) rotate(45deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(45deg);
+  }
+}
+
+/* Onboarding survey entrance animations. The card springs up + settles;
+   list items (verb cards, capability rows, pills) rise in with a small
+   per-item delay set inline via `animation-delay` for a staggered feel. */
+@keyframes survey-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes survey-card-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes survey-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.survey-overlay-in {
+  animation: survey-overlay-in 220ms ease-out both;
+}
+.survey-card-in {
+  animation: survey-card-in 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.survey-rise {
+  animation: survey-rise 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Intent popover: grows down out of the chip and folds back up on close. */
+@keyframes intent-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scaleY(0.9); }
+  to   { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+@keyframes intent-pop-out {
+  from { opacity: 1; transform: translateY(0) scaleY(1); }
+  to   { opacity: 0; transform: translateY(-4px) scaleY(0.9); }
+}
+.intent-pop-in {
+  transform-origin: top;
+  animation: intent-pop-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.intent-pop-out {
+  transform-origin: top;
+  animation: intent-pop-out 150ms ease-in both;
+}
+
+/* ---------------------------------------------------------------------------
+   Onboarding intro, "editorial title page": a printed page being set. The
+   plane rises once, a head rule draws across the top, the kicker + greeting +
+   lines "set" into place (type tightening as it locks), and a foot rule fills
+   asymptotically to signal the scan without ever lying about being done. The
+   fill itself is an inline transform + transition (see the component), not a
+   keyframe, so completing it to 1 never fights a running animation.
+   --------------------------------------------------------------------------- */
+@keyframes edp-plane-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.edp-plane {
+  animation: edp-plane-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes edp-rule-draw {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.edp-headrule {
+  transform-origin: left;
+  animation: edp-rule-draw 700ms ease-out both;
+}
+@keyframes edp-line-set {
+  from { opacity: 0; transform: translateY(6px); letter-spacing: 0.03em; }
+  to   { opacity: 1; transform: none; letter-spacing: 0; }
+}
+.edp-line {
+  animation: edp-line-set 520ms ease-out both;
+}
+@keyframes edp-shimmer {
+  from { background-position: -40% 0; }
+  to   { background-position: 140% 0; }
+}
+.edp-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(166, 107, 73, 0.28),
+    transparent
+  );
+  background-size: 45% 100%;
+  background-repeat: no-repeat;
+  animation: edp-shimmer 2.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .edp-plane,
+  .edp-headrule,
+  .edp-line {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    letter-spacing: 0;
+  }
+  .edp-shimmer {
+    animation: none;
+  }
+}
+
+/* Loading mark: a clay point travels the wiring; the blocks breathe. A
+   seamless infinite loop, so an unknown-length wait never "finishes". */
+@keyframes mark-travel {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+.mark-comet {
+  animation: mark-travel 2.4s linear infinite;
+}
+@keyframes mark-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.09);
+    opacity: 1;
+  }
+}
+.mark-node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mark-breathe 2.6s ease-in-out infinite;
+}
+/* One quiet fade for the whole intro's text. */
+@keyframes mark-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mark-fade-in {
+  animation: mark-fade-in 480ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark-comet,
+  .mark-node {
+    animation: none;
+  }
+}
+
+/* Bubble pop animations for the click-block → fan-out-bubbles feature.
+ *
+ * The translate(--enter-dx, --enter-dy) start positions the bubble AT
+ * the parent block's center (FunctionBubble passes the offset as CSS
+ * custom props), so the animation reads as a radial outward shoot from
+ * the block rather than an in-place pop.
+ *
+ * Entry uses an overshoot cubic-bezier (final control point > 1) for a
+ * spring-like settle at the destination. Exit is the reverse — bubble
+ * shrinks back into the block center on collapse. */
+@keyframes bubble-pop-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--enter-dx, 0px), var(--enter-dy, 0px)) scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+@keyframes bubble-pop-out {
+  from {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--enter-dx, 0px), var(--enter-dy, 0px)) scale(0.3);
+  }
+}
+.bubble-enter {
+  animation: bubble-pop-in 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.bubble-exit {
+  animation: bubble-pop-out 380ms cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+}
+
+/* Ambient sector backdrop drawn behind the bubble cluster. Slower and
+ * more subtle than the bubble pop so it reads as background context,
+ * not a competing focal point. Origin is the SVG center so the scale
+ * grows from the block outward. */
+@keyframes bubble-sector-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+}
+@keyframes bubble-sector-out {
+  from {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.bubble-sector-enter {
+  animation: bubble-sector-in 520ms ease-out both;
+  transform-origin: center;
+}
+.bubble-sector-exit {
+  animation: bubble-sector-out 360ms ease-in forwards;
+  transform-origin: center;
+}
+
+/* Marching-ants dashed stroke used on edges the user just pulled,
+ * before Claude has finished reacting. Animates the stroke offset so
+ * the dashes appear to flow in the direction of the arrow. Pair with
+ * a dashed strokeDasharray inline on the edge element. */
+@keyframes pending-edge-march {
+  to { stroke-dashoffset: -20; }
+}
+
+.pending-edge {
+  animation: pending-edge-march 0.9s linear infinite;
+}
+
+/* Pulse used on placeholder blocks (the dashed-border "New block…"
+ * card) while waiting for Claude to scaffold. Blue rings expand and
+ * fade so the block visibly "breathes", making it obvious something
+ * is in flight. Mirrors focus-pulse's structure but in #78716C. */
+@keyframes pending-block-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgba(59, 91, 217, 0.0),
+      0 0 0 6px rgba(59, 91, 217, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px rgba(59, 91, 217, 0.10),
+      0 0 0 12px rgba(59, 91, 217, 0.22);
+  }
+}
+
+.pending-block-pulse {
+  animation: pending-block-pulse 1.6s ease-in-out infinite;
+}
+
+/* Steady-state "just edited" highlight for blocks/arrows after Claude
+ * settles. Persists until the user takes their next action — that's
+ * dismissRecentEdit on the diagram side. Solid blue ring + tinted
+ * background so it's obvious-but-not-jarring; no animation, since the
+ * marching-ants already conveyed "in flight" during generate. */
+.recent-change-block {
+  border-color: #3B5BD9 !important;
+  /* A solid 2.5px ring first, then the soft halo: the old translucent-only
+     ring read weaker than the 2px solid blue edges next to it, so the
+     "just edited" block was the least visible part of its own change. */
+  box-shadow:
+    0 0 0 2.5px #3B5BD9,
+    0 0 0 7px rgba(59, 91, 217, 0.16),
+    0 4px 16px rgba(59, 91, 217, 0.14);
+}
+
+/* Recent-change style for an SVG edge path. A freshly connected /
+ * edited arrow stays solid BLUE (the "just edited" color, matching the
+ * block ring) against the regular grey edges until the user's next
+ * action. Solid, not dashed: the edit is finished. */
+.recent-change-edge {
+  stroke: #3B5BD9 !important;
+  stroke-width: 2 !important;
+}

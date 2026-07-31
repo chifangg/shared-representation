@@ -13,9 +13,10 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { logEvent } from "@/core/interactionLog";
 import type { FileEntry } from "@/core/project";
 import type { CapabilityCandidate, CapabilityScanState } from "../types";
-import { buildScanContext } from "../api/buildProjectContext";
+import { buildScanContext, findSummaryDoc } from "../api/buildProjectContext";
 import { fetchCapabilityScanStream } from "../api/fetchCapabilityScan";
 
 export function useCapabilityScan({
@@ -50,6 +51,15 @@ export function useCapabilityScan({
     // Onboarding scan: read a trusted architecture doc (CLAUDE.md /
     // AGENTS.md) + tree when present instead of the whole codebase.
     // Falls back to full context otherwise.
+    const summaryDoc = findSummaryDoc(files);
+    // Record which context the scan used, so it's verifiable from the
+    // interaction log whether a CLAUDE.md / AGENTS.md was read instead of the
+    // full codebase (otherwise this frontend decision leaves no trace).
+    logEvent("capability-scan", {
+      usedSummaryDoc: summaryDoc !== null,
+      docPath: summaryDoc?.path ?? null,
+      fileCount: files.length,
+    });
     const projectContext = buildScanContext(files);
     const candidates: CapabilityCandidate[] = [];
 
