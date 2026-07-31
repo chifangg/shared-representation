@@ -13,6 +13,18 @@
 
 use serde_json::json;
 
+/// The six block categories. Single source for the tool schemas here and in
+/// `main.rs`, and for `block_refresh` validation. Must match the frontend
+/// BlockCategory union in `src/features/diagram/types.ts`.
+pub const BLOCK_CATEGORIES: [&str; 6] = [
+    "interface",
+    "logic",
+    "data",
+    "state",
+    "integration",
+    "config",
+];
+
 fn block_input_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -23,7 +35,7 @@ fn block_input_schema() -> serde_json::Value {
             "parent": { "type": ["string", "null"], "description": "Parent block id, or null for top-level blocks." },
             "category": {
                 "type": "string",
-                "enum": ["interface", "logic", "data", "state", "integration", "config"],
+                "enum": BLOCK_CATEGORIES,
                 "description": "Exactly one role for this block, judged on two axes. BOUNDARY: interface = the inbound edge, where the outside reaches in (UI screens/panels, API endpoints, CLI commands); integration = the outbound edge, external services this project calls out to (network clients, third-party SDKs). INTERNAL (what it manages): logic = processing that keeps no state across calls (engines, rules, transforms, business logic); state = runtime state held across calls but NOT persisted (stores, session, in-memory caches, context); data = persistent or shared data (datasets, models, schemas, databases, files). config = off the runtime request path (setup, build, theming, infra, environment, tooling). Tie-break, pick the SINGLE role that dominates why the block exists: inbound vs outbound = who initiates (outside calls in = interface, this project calls out = integration); state vs data = transient runtime memory (state) vs persisted or shared across runs (data); config only when it is not on the runtime path."
             },
             "capabilities": {
@@ -99,6 +111,25 @@ pub(super) fn structure_tools() -> Vec<serde_json::Value> {
     ]
 }
 
+/// Same shape as a structure block, but `parent` is REQUIRED and must be an
+/// existing overview block id. It is a detail block's only tie back to the
+/// canvas (detail arrows stay detail-to-detail by design), so a missing or
+/// label-valued parent left the detail chain floating disconnected in the
+/// focus panel and islanded if the user promoted it onto the canvas.
+fn detail_block_input_schema() -> serde_json::Value {
+    let mut schema = block_input_schema();
+    schema["properties"]["parent"] = json!({
+        "type": "string",
+        "minLength": 1,
+        "description": "REQUIRED. The id of the existing overview block this detail belongs to. Always the id from EXISTING OVERVIEW BLOCKS, never the label, never null, never a detail_ id."
+    });
+    schema["required"]
+        .as_array_mut()
+        .expect("block_input_schema required is an array")
+        .push(json!("parent"));
+    schema
+}
+
 pub(super) fn focus_tools() -> Vec<serde_json::Value> {
     vec![
         json!({
@@ -115,7 +146,7 @@ pub(super) fn focus_tools() -> Vec<serde_json::Value> {
         json!({
             "name": "detail_block",
             "description": "Emit one detail sub-block under an existing overview block.",
-            "input_schema": block_input_schema(),
+            "input_schema": detail_block_input_schema(),
         }),
         json!({
             "name": "detail_arrow",

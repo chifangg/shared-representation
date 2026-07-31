@@ -212,7 +212,7 @@ fn build_tool_registry() -> core::tools::ToolRegistry {
                 },
                 "category": {
                     "type": "string",
-                    "enum": ["interface", "logic", "data", "state", "integration", "config"],
+                    "enum": diagram::BLOCK_CATEGORIES,
                     "description": "The new category, which sets the block's color. \
                         Categories and their colors: interface = warm coral, \
                         logic = olive green, data = slate blue, state = teal, \

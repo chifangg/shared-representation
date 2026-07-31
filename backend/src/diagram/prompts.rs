@@ -53,7 +53,7 @@ Each detail block has `parent` pointing to one of the existing overview block id
 (e.g. if the conversation is about login, detail blocks might be \"Password hashing\", \"JWT issuance\", \"Session storage\").\n\n\
 RULES:\n\
 - DO NOT regenerate the overview blocks — they already exist and stay. Only call focus, detail_block, and detail_arrow.\n\
-- Detail block `parent` MUST be an existing overview block id from the EXISTING OVERVIEW BLOCKS list.\n\
+- Detail block `parent` MUST be an existing overview block id from the EXISTING OVERVIEW BLOCKS list. Always the `id` field, NEVER the label, and never a detail_ id. Every detail block needs it; the schema rejects a detail_block without one.\n\
 - Detail blocks may have arrows BETWEEN themselves (use detail_arrow). Skip arrows back up to overview blocks.\n\
 - Caption is one short sentence; populate provenance.files and provenance.functions where applicable.\n\
 - Use ids prefixed with \"detail_\" (e.g. \"detail_jwt_issuance\") to avoid colliding with overview ids.\n\n\

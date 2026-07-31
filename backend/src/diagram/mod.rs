@@ -17,6 +17,7 @@ mod prompts;
 mod tools;
 
 pub use block_refresh::block_refresh;
+pub use tools::BLOCK_CATEGORIES;
 pub use connection_detail::connection_detail;
 pub use function_detail::function_detail;
 pub use handler::generate_diagram;
