@@ -197,8 +197,16 @@ function CodeColumnAutoSize({
   const prevRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (prevRef.current === open) return;
+    const isFirstRun = prevRef.current === null;
     prevRef.current = open;
-    logEvent("panels-toggle", { show: open });
+    // Only real transitions get logged, and as "system": this is the code
+    // column auto-sizing after a file open/close (both logged as user
+    // events themselves). Logging the first run made every REMOUNT of this
+    // helper stamp a phantom show:false, which flooded the event log in
+    // same-second bursts.
+    if (!isFirstRun) {
+      logEvent("panels-toggle", { show: open }, "system");
+    }
     onTransition(open);
   }, [open, onTransition]);
   return null;

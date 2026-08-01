@@ -28,8 +28,12 @@
   .src.system { background: #E4E2DE; color: #6B6256; }
   .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
   .muted { color: #A8A29E; }
-  .payload { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-  .payload.open { white-space: pre-wrap; overflow: visible; }
+  /* A block INSIDE the cell, with a hard width: a td's own max-width loses
+     to the table's min-content sizing on long unbroken JSON, which shoved
+     the delete column over the text. */
+  .payload { width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .payload.open { white-space: pre-wrap; word-break: break-all; overflow: visible; width: auto; max-width: 640px; }
+  td.slim { width: 28px; white-space: nowrap; }
   .lbl { color: #7C5C2E; background: #F3EAD7; border-radius: 5px; padding: 0 6px; cursor: pointer; }
   .lbl.empty { color: #C4BBAD; background: transparent; }
   .part { color: #3F5A52; background: #DCEAE4; border-radius: 5px; padding: 0 6px; cursor: pointer; font-weight: 600; }
@@ -40,7 +44,13 @@
   .count { font-weight: 600; }
   #sess-context { padding: 8px 16px; border-bottom: 1px solid #EEE9E1; background: #FCFBF9; display: flex; align-items: center; gap: 10px; }
   #sess-context[hidden] { display: none; }
-  #empty, #s-empty { padding: 40px; text-align: center; color: #A8A29E; }
+  #empty, #s-empty, #tl-empty { padding: 40px; text-align: center; color: #A8A29E; }
+  #tl-context { padding: 8px 16px; border-bottom: 1px solid #EEE9E1; background: #FCFBF9; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #tl-scroll { overflow-x: auto; padding: 8px 0 16px; }
+  #tl-svg text { font: 10px ui-sans-serif, system-ui, sans-serif; fill: #8A8276; }
+  #tl-svg .lane-label { font-size: 11px; font-weight: 600; fill: #6B6256; }
+  .tl-key { display: inline-flex; align-items: center; gap: 5px; margin-right: 10px; font-size: 11px; color: #6B6256; }
+  .tl-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; }
 </style>
 </head>
 <body>
@@ -82,6 +92,12 @@
   <div id="s-empty" hidden>No sessions yet.</div>
 </section>
 
+<section id="timeline-wrap" hidden>
+  <div id="tl-context"></div>
+  <div id="tl-scroll"><svg id="tl-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <div id="tl-empty" hidden>No events in this session.</div>
+</section>
+
 <section id="events-wrap" hidden>
   <div id="sess-context" hidden></div>
   <table>
@@ -104,16 +120,22 @@ const qs = (o) => Object.entries(o).filter(([,v]) => v !== "" && v != null)
 const el = (id) => document.getElementById(id);
 
 let view = "sessions";
+let tlSid = null;
 function setView(v) {
   view = v;
   el("sessions-wrap").hidden = v !== "sessions";
   el("events-wrap").hidden = v !== "events";
+  el("timeline-wrap").hidden = v !== "timeline";
   el("filters").style.display = v === "events" ? "contents" : "none";
   el("btn-sessions").classList.toggle("on", v === "sessions");
   el("btn-events").classList.toggle("on", v === "events");
   reload();
 }
-function reload() { if (view === "sessions") loadSessions(); else load(); }
+function reload() {
+  if (view === "sessions") loadSessions();
+  else if (view === "timeline") loadTimeline();
+  else load();
+}
 
 function fmt(ts) {
   const d = new Date(ts);
@@ -160,6 +182,12 @@ function updateSessionContext(sidFilter, rows) {
   };
   strip.appendChild(sidSpan);
   strip.appendChild(pb);
+  // Mirror of the timeline's "table view" button, so the two views of one
+  // session link both ways.
+  const tlBtn = document.createElement("button");
+  tlBtn.textContent = "timeline";
+  tlBtn.onclick = () => navigate("timeline", fullSid);
+  strip.appendChild(tlBtn);
   strip.hidden = false;
 }
 
@@ -199,6 +227,23 @@ async function loadSessions() {
     tr.appendChild(td(fmt(s.last_ts), "mono"));
 
     const delTd = document.createElement("td");
+    const tlBtn = document.createElement("button");
+    tlBtn.className = "rowbtn";
+    // Static literal, no user data: a mini dot-strip glyph (the ▤ glyph
+    // rendered as an odd striped box on macOS).
+    tlBtn.innerHTML =
+      '<svg width="15" height="12" viewBox="0 0 15 12" aria-hidden="true">' +
+      '<line x1="1" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.2"/>' +
+      '<circle cx="3.5" cy="3.5" r="1.7" fill="currentColor"/>' +
+      '<circle cx="7.5" cy="6.5" r="1.7" fill="currentColor"/>' +
+      '<circle cx="11.5" cy="3.5" r="1.7" fill="currentColor"/></svg>';
+    tlBtn.title = "Timeline strip of this session's events";
+    tlBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (!sid) { alert("These rows have no session id."); return; }
+      navigate("timeline", sid);
+    };
+    delTd.appendChild(tlBtn);
     const del = document.createElement("button");
     del.className = "rowbtn";
     del.textContent = "✕";
@@ -290,11 +335,17 @@ function render(rows) {
     lblTd.appendChild(lbl);
     tr.appendChild(lblTd);
 
-    const payTd = td(JSON.stringify(r.payload), "payload mono");
-    payTd.onclick = () => payTd.classList.toggle("open");
+    const payTd = document.createElement("td");
+    const pv = document.createElement("div");
+    pv.className = "payload mono";
+    pv.textContent = JSON.stringify(r.payload);
+    pv.title = "Click to expand";
+    pv.onclick = () => pv.classList.toggle("open");
+    payTd.appendChild(pv);
     tr.appendChild(payTd);
 
     const delTd = document.createElement("td");
+    delTd.className = "slim";
     const del = document.createElement("button");
     del.className = "rowbtn";
     del.textContent = "✕";
@@ -322,6 +373,193 @@ function td(text, cls) {
   return c;
 }
 
+/* ---- Timeline strip -----------------------------------------------------
+   A per-session sequence plot in the spirit of interaction-strip figures:
+   one row per lane, one dot per event, time on x. The lane mapping lives in
+   EVENT_LANE below and is EXPECTED to be revised as the analysis matures;
+   events it does not know fall back to a lane by source, so new
+   instrumentation shows up without touching this file. Cancel-like events
+   render hollow. Vertical rules mark turn-complete boundaries. */
+const LANES = [
+  { key: "prompt",  label: "Prompt",     color: "#9C5638" },
+  { key: "explore", label: "Explore",    color: "#3F6B63" },
+  { key: "edit",    label: "Edit move",  color: "#5B6B9C" },
+  { key: "other",   label: "Other user", color: "#8A8276" },
+  { key: "agent",   label: "Agent",      color: "#B0975A" },
+  { key: "system",  label: "System",     color: "#C4BBAD" },
+];
+const EVENT_LANE = {
+  "chat-send": "prompt", "gate-describe": "prompt", "card-pick": "prompt",
+  "detail-apply": "prompt", "context-drop": "prompt",
+  // Onboarding and intent-revision are setup acts, not conversation
+  // submissions; the Prompt lane stays strictly "text that reached the
+  // agent conversation".
+  "survey-submit": "other", "survey-revise": "other",
+  "node-click": "explore", "bubble-open": "explore", "lens-open": "explore",
+  "lens-close": "explore", "pane-click": "explore",
+  "tracker-toggle": "explore", "trace-step": "explore",
+  "trace-clear": "explore", "focus-mode": "explore",
+  "scheme-switch": "explore", "scheme-generate": "explore",
+  "panel-detail-click": "explore", "intent-chip-toggle": "explore",
+  "block-drag": "explore",
+  "arrow-draw": "edit", "block-add": "edit", "block-actions": "edit",
+  "block-rename": "edit", "gate-suggest": "edit", "gate-cancel": "edit",
+  "card-cancel": "edit", "detail-preview": "edit", "detail-cancel": "edit",
+  "promote": "edit", "unpromote": "edit", "diagram-retry": "edit",
+  "intent-edit-open": "other", "intent-edit-cancel": "other",
+};
+function laneOf(r) {
+  const mapped = EVENT_LANE[r.event];
+  if (mapped) return mapped;
+  if (r.source === "agent") return "agent";
+  if (r.source === "system") return "system";
+  return "other";
+}
+function isHollow(r) {
+  if (/cancel|clear|close/.test(r.event)) return true;
+  const p = r.payload || {};
+  if (r.event === "focus-mode" && p.on === false) return true;
+  if (r.event === "tracker-toggle" && p.open === false) return true;
+  // A pane click that dismissed something is the closing half of a pair
+  // (fan opened by node-click, trace opened by trace-step, ...); the same
+  // goes for a node re-click whose outcome closed its fan.
+  if (typeof p.outcome === "string" && p.outcome.includes("close")) return true;
+  if (typeof p.closed === "string" && p.closed !== "none") return true;
+  return false;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(name, attrs) {
+  const n = document.createElementNS(SVGNS, name);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+}
+
+async function loadTimeline() {
+  if (!tlSid) { navigate("sessions"); return; }
+  const res = await fetch(
+    `/api/log/query?${qs({ session: tlSid, limit: 5000, token })}`,
+  );
+  const body = await res.json();
+  if (!body.success) { el("summary").textContent = body.error || "error"; return; }
+  // Query returns newest first; the strip reads left to right in time.
+  const rows = body.data.slice().reverse();
+  renderTimeline(rows);
+}
+
+function renderTimeline(rows) {
+  const svg = el("tl-svg");
+  svg.replaceChildren();
+  el("tl-empty").hidden = rows.length > 0;
+
+  const strip = el("tl-context");
+  strip.replaceChildren();
+  const sidSpan = document.createElement("span");
+  sidSpan.className = "mono muted";
+  sidSpan.textContent = "session " + tlSid.slice(0, 8);
+  strip.appendChild(sidSpan);
+  const participant = rows.length ? rows[rows.length - 1].participant : null;
+  if (participant) {
+    const pb = document.createElement("span");
+    pb.className = "part";
+    pb.textContent = participant;
+    strip.appendChild(pb);
+  }
+  const evBtn = document.createElement("button");
+  evBtn.textContent = "table view";
+  evBtn.onclick = () => navigate("events", tlSid);
+  strip.appendChild(evBtn);
+  for (const lane of LANES) {
+    const k = document.createElement("span");
+    k.className = "tl-key";
+    const dot = document.createElement("span");
+    dot.className = "tl-dot";
+    dot.style.background = lane.color;
+    k.appendChild(dot);
+    k.appendChild(document.createTextNode(lane.label));
+    strip.appendChild(k);
+  }
+  const hollowKey = document.createElement("span");
+  hollowKey.className = "tl-key";
+  const hd = document.createElement("span");
+  hd.className = "tl-dot";
+  hd.style.background = "#fff";
+  hd.style.border = "2px solid #8A8276";
+  hollowKey.appendChild(hd);
+  hollowKey.appendChild(document.createTextNode("cancel / close"));
+  strip.appendChild(hollowKey);
+  if (rows.length === 0) return;
+
+  const t0 = rows[0].ts;
+  const t1 = rows[rows.length - 1].ts;
+  const dur = Math.max(1000, t1 - t0);
+  const LEFT = 92, TOP = 18, ROW = 34, RIGHT = 30;
+  // Wide enough that a dense minute does not smear into one blob, capped so
+  // an hour-long session stays scrollable rather than absurd.
+  const plotW = Math.max(680, Math.min(6000, Math.round(dur / 1000) * 6));
+  const H = TOP + LANES.length * ROW + 28;
+  const W = LEFT + plotW + RIGHT;
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const x = (ts) => LEFT + ((ts - t0) / dur) * plotW;
+  const laneY = {};
+  LANES.forEach((l, i) => { laneY[l.key] = TOP + i * ROW + ROW / 2; });
+
+  for (const [i, lane] of LANES.entries()) {
+    const y = TOP + i * ROW;
+    if (i % 2 === 1) {
+      svg.appendChild(svgEl("rect", {
+        x: 0, y, width: W, height: ROW, fill: "#F1EEE8",
+      }));
+    }
+    const label = svgEl("text", { x: 8, y: y + ROW / 2 + 4, class: "lane-label" });
+    label.textContent = lane.label;
+    svg.appendChild(label);
+  }
+
+  // Time ticks at a step that yields a readable count.
+  const steps = [10e3, 30e3, 60e3, 120e3, 300e3, 600e3, 1800e3, 3600e3];
+  const step = steps.find((s) => dur / s <= 14) || steps[steps.length - 1];
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
+    svg.appendChild(svgEl("line", {
+      x1: x(t), y1: TOP, x2: x(t), y2: TOP + LANES.length * ROW,
+      stroke: "#E3DED4", "stroke-width": 1,
+    }));
+    const tick = svgEl("text", {
+      x: x(t), y: TOP + LANES.length * ROW + 16, "text-anchor": "middle",
+    });
+    tick.textContent = new Date(t).toLocaleTimeString("en-GB", { hour12: false });
+    svg.appendChild(tick);
+  }
+
+  // Turn boundaries: a completed agent turn is the natural column break
+  // when reading the strip as prompt, actions, response episodes.
+  for (const r of rows) {
+    if (r.event !== "turn-complete") continue;
+    svg.appendChild(svgEl("line", {
+      x1: x(r.ts), y1: TOP - 4, x2: x(r.ts), y2: TOP + LANES.length * ROW + 4,
+      stroke: "#C9B58E", "stroke-width": 1, "stroke-dasharray": "3 3",
+    }));
+  }
+
+  for (const r of rows) {
+    const lane = LANES.find((l) => l.key === laneOf(r)) || LANES[3];
+    const hollow = isHollow(r);
+    const dot = svgEl("circle", {
+      cx: x(r.ts).toFixed(1), cy: laneY[lane.key], r: 4.5,
+      fill: hollow ? "#FCFBF9" : lane.color,
+      stroke: lane.color, "stroke-width": hollow ? 2 : 0,
+    });
+    const tip = document.createElementNS(SVGNS, "title");
+    tip.textContent =
+      `${fmt(r.ts)}  ${r.event} (${r.source})\n` + JSON.stringify(r.payload);
+    dot.appendChild(tip);
+    svg.appendChild(dot);
+  }
+  el("summary").textContent =
+    `${rows.length} events · ${Math.round(dur / 60000)} min`;
+}
+
 function navigate(v, sid) {
   if (v === "events") {
     if (sid !== undefined) el("f-session").value = sid || "";
@@ -331,15 +569,26 @@ function navigate(v, sid) {
       "",
       cur ? `#events=${encodeURIComponent(cur)}` : "#events",
     );
+  } else if (v === "timeline") {
+    tlSid = sid || tlSid;
+    history.pushState(
+      { view: v },
+      "",
+      `#timeline=${encodeURIComponent(tlSid || "")}`,
+    );
   } else {
     history.pushState({ view: v }, "", location.pathname + location.search);
   }
   setView(v);
 }
 function initFromLocation() {
-  const m = location.hash.match(/^#events(?:=(.*))?$/);
-  if (m) {
-    if (m[1]) el("f-session").value = decodeURIComponent(m[1]);
+  const me = location.hash.match(/^#events(?:=(.*))?$/);
+  const mt = location.hash.match(/^#timeline=(.+)$/);
+  if (mt) {
+    tlSid = decodeURIComponent(mt[1]);
+    setView("timeline");
+  } else if (me) {
+    if (me[1]) el("f-session").value = decodeURIComponent(me[1]);
     setView("events");
   } else {
     setView("sessions");

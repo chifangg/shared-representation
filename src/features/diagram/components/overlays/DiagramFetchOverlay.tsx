@@ -35,7 +35,7 @@ export function DiagramFetchOverlay({
       // Progress indicators are chrome, so they wear the chrome palette
       // instead of introducing yet another color family.
       return (
-        <div className="pointer-events-none absolute bottom-3 right-3 z-50 flex items-center gap-2 rounded-full border border-[#C9C8C3] bg-[#DCDBD6]/95 px-3.5 py-2 text-[12.5px] text-[#5A5954] shadow-[0_8px_20px_-8px_rgba(51,50,47,0.4)]">
+        <div className="pointer-events-none absolute bottom-3 right-3 z-50 flex items-center gap-2 rounded-full border border-[#C9C8C3] bg-[#DCDBD6] px-3.5 py-2 text-[12.5px] text-[#5A5954] shadow-[0_8px_20px_-8px_rgba(51,50,47,0.4)]">
           <Loader2
             className="h-3.5 w-3.5 animate-spin text-[#6E6D68]"
             strokeWidth={2}

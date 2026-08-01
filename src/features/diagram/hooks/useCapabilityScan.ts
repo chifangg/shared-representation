@@ -55,11 +55,17 @@ export function useCapabilityScan({
     // Record which context the scan used, so it's verifiable from the
     // interaction log whether a CLAUDE.md / AGENTS.md was read instead of the
     // full codebase (otherwise this frontend decision leaves no trace).
-    logEvent("capability-scan", {
-      usedSummaryDoc: summaryDoc !== null,
-      docPath: summaryDoc?.path ?? null,
-      fileCount: files.length,
-    });
+    logEvent(
+      "capability-scan",
+      {
+        usedSummaryDoc: summaryDoc !== null,
+        docPath: summaryDoc?.path ?? null,
+        fileCount: files.length,
+      },
+      // A fetch decision, not a user action: keep it OUT of the
+      // source="user" slice the engagement analysis filters on.
+      "system",
+    );
     const projectContext = buildScanContext(files);
     const candidates: CapabilityCandidate[] = [];
 

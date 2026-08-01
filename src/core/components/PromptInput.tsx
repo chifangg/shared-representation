@@ -1,9 +1,9 @@
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 
 /** Tallest the input grows before it starts scrolling internally (px).
- *  About six lines; past that the textarea scrolls instead of pushing the
- *  transcript up further. */
-const MAX_INPUT_H = 148;
+ *  About four lines; past that the textarea scrolls instead of pushing
+ *  the transcript up (six felt like the input was taking over the panel). */
+const MAX_INPUT_H = 104;
 
 export function PromptInput({
   onSubmit,

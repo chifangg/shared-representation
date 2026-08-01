@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { logEvent } from "@/core/interactionLog";
 import type { IntentSelection } from "../types";
 
 /**
@@ -34,6 +35,14 @@ export function useOnboardingIntent({
    *  Setting userGoal (from null) lets the structure fetch fire. */
   const complete = useCallback(
     (goal: string, selection: IntentSelection) => {
+      // Verb + counts only: the composed goal and free-text answers stay
+      // out of the log (policy: lengths, not bodies).
+      logEvent("survey-submit", {
+        verb: selection.verb,
+        caps: selection.capabilities.length,
+        understandCaps: selection.understandCaps.length,
+        goalLen: goal.length,
+      });
       setIntent(selection);
       setUserGoal(goal);
     },
@@ -45,6 +54,11 @@ export function useOnboardingIntent({
    *  looking never forces a regenerate. */
   const revise = useCallback(
     (goal: string, selection: IntentSelection) => {
+      logEvent("survey-revise", {
+        verb: selection.verb,
+        changed: goal !== userGoal,
+        goalLen: goal.length,
+      });
       setEditingIntent(false);
       setIntent(selection);
       if (goal === userGoal) return;
@@ -54,8 +68,17 @@ export function useOnboardingIntent({
     [userGoal, setUserGoal, onRegenerate],
   );
 
-  const openEditor = useCallback(() => setEditingIntent(true), []);
-  const closeEditor = useCallback(() => setEditingIntent(false), []);
+  // Both are reached only from direct user actions (the chip's Change
+  // button and the editor's cancel), so source stays "user". A revise
+  // SUBMIT goes through revise() above and is not a cancel.
+  const openEditor = useCallback(() => {
+    logEvent("intent-edit-open", {});
+    setEditingIntent(true);
+  }, []);
+  const closeEditor = useCallback(() => {
+    logEvent("intent-edit-cancel", {});
+    setEditingIntent(false);
+  }, []);
 
   return { intent, editingIntent, complete, revise, openEditor, closeEditor };
 }

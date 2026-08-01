@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { Connection } from "@xyflow/react";
 import type { FileEntry } from "@/core/project";
+import { logEvent } from "@/core/interactionLog";
 import {
   serializeTarget,
   type ConnectionOption,
@@ -28,6 +29,18 @@ import type { DiagramBus } from "../protocol/bus";
 import { useDiagramBusSubscribe } from "../protocol/bus";
 import type { ChosenOption } from "./useChatSettleEffect";
 import { dlog, dwarn } from "../util/debug";
+
+/** Compact interaction-log payload for an edit target: ids only, the
+ *  study's sequence analysis re-labels them from the schema snapshot. */
+function logTarget(target: EditTarget): Record<string, unknown> {
+  if (target.kind === "arrow") {
+    return { kind: "arrow", from: target.from, to: target.to };
+  }
+  if (target.kind === "block") {
+    return { kind: "block", blockId: target.id };
+  }
+  return { kind: "new-block" };
+}
 
 /**
  * Owns the whole visual-edit / connection flow that the diagram canvas
@@ -137,6 +150,7 @@ export function useVisualEditHandlers({
    */
   const handleAddNewBlock = useCallback(() => {
     if (state.kind !== "ready") return;
+    logEvent("block-add", {});
     dismissRecentEdit();
     const placeholderId = `__pending_new_${Date.now()}`;
     setState((prev) => {
@@ -173,18 +187,20 @@ export function useVisualEditHandlers({
    */
   const handleRenameBlock = useCallback(
     (blockId: string, newLabel: string) => {
+      // Validity decided OUTSIDE the updater: the emit used to live inside
+      // setState, which must stay pure (StrictMode runs updaters twice, so
+      // the rename prompt could dispatch twice). Base schema only, matching
+      // the updater below, which cannot rename promoted blocks.
+      if (state.kind !== "ready") return;
+      const block = state.schema.blocks.find((b) => b.id === blockId);
+      if (!block || block.label === newLabel) return;
+      logEvent("block-rename", { blockId, from: block.label, to: newLabel });
+      bus.emit("visual-edit", {
+        prompt: composeRenamePrompt(block, newLabel),
+        kind: "rename",
+      });
       setState((prev) => {
         if (prev.kind !== "ready") return prev;
-        const block = prev.schema.blocks.find((b) => b.id === blockId);
-        if (!block) return prev;
-        const oldLabel = block.label;
-        if (oldLabel === newLabel) return prev;
-
-        bus.emit("visual-edit", {
-          prompt: composeRenamePrompt(block, newLabel),
-          kind: "rename",
-        });
-
         return {
           kind: "ready",
           schema: {
@@ -196,7 +212,7 @@ export function useVisualEditHandlers({
         };
       });
     },
-    [setState, bus],
+    [state, setState, bus],
   );
 
   /**
@@ -316,6 +332,7 @@ export function useVisualEditHandlers({
       if (!blocks.some((b) => b.id === source)) return;
       if (!blocks.some((b) => b.id === target)) return;
       if (arrows.some((a) => a.from === source && a.to === target)) return;
+      logEvent("arrow-draw", { from: source, to: target });
       // viewSchema MUST be in this callback's deps: promoting a block
       // changes only the merged view (not `state`), and a stale closure
       // here silently rejected arrows drawn from freshly promoted blocks.
@@ -415,6 +432,11 @@ export function useVisualEditHandlers({
    */
   useDiagramBusSubscribe("options-ready", (detail) => {
     if (!detail) return;
+    logEvent(
+      "options-ready",
+      { ...logTarget(detail.target), count: detail.options.length },
+      "agent",
+    );
     chosenOptionsRef.current.delete(serializeTarget(detail.target));
     setPendingOptions({ target: detail.target, options: detail.options });
   });
@@ -482,6 +504,7 @@ export function useVisualEditHandlers({
       toAdd.push({ from, to, label, pending: "claude" });
     }
     if (toAdd.length === 0) return;
+    logEvent("arrows-added", { count: toAdd.length }, "agent");
     dlog("recent-debug:arrows-added applied", {
       toAdd: toAdd.map((a) => `${a.from}->${a.to}(${a.label})`),
     });
@@ -524,6 +547,15 @@ export function useVisualEditHandlers({
       if (state.kind !== "ready") return;
       const { target } = pendingOptions;
 
+      // Agent-authored card titles are labels (loggable); a custom pick's
+      // title is the user's own prompt text, so only its length is kept.
+      logEvent("card-pick", {
+        ...logTarget(target),
+        optionKind: option.kind,
+        ...(option.custom
+          ? { custom: true, textLen: option.title.length }
+          : { title: option.title.slice(0, 80) }),
+      });
       markArrowHandedOff(target);
       bus.emit("option-executed", { target, option });
       bus.emit("visual-edit", {
@@ -581,6 +613,7 @@ export function useVisualEditHandlers({
    *  longer exist. */
   const handleCancelOptions = useCallback(() => {
     if (!pendingOptions) return;
+    logEvent("card-cancel", logTarget(pendingOptions.target));
     bus.emit("options-cancelled", { target: pendingOptions.target });
     removeTargetVisual(pendingOptions.target);
     setPendingOptions(null);
@@ -591,6 +624,7 @@ export function useVisualEditHandlers({
    *  ChatView parses the response. */
   const handleIntentGateAskSuggestions = useCallback(() => {
     if (!intentGate) return;
+    logEvent("gate-suggest", logTarget(intentGate.target));
     dispatchSuggestionsRound1(intentGate.target);
     setIntentGate(null);
   }, [intentGate, dispatchSuggestionsRound1]);
@@ -602,6 +636,10 @@ export function useVisualEditHandlers({
       if (!intentGate) return;
       const trimmed = text.trim();
       if (!trimmed) return;
+      logEvent("gate-describe", {
+        ...logTarget(intentGate.target),
+        textLen: trimmed.length,
+      });
       dispatchExecuteDirect(intentGate.target, trimmed);
       setIntentGate(null);
     },
@@ -611,6 +649,7 @@ export function useVisualEditHandlers({
   /** Intent gate cancel: drop any on-canvas placeholder. */
   const handleIntentGateCancel = useCallback(() => {
     if (!intentGate) return;
+    logEvent("gate-cancel", logTarget(intentGate.target));
     removeTargetVisual(intentGate.target);
     setIntentGate(null);
   }, [intentGate, removeTargetVisual]);
@@ -625,6 +664,7 @@ export function useVisualEditHandlers({
       if (state.kind !== "ready") return;
       // Merged view: the "..." affordance works on promoted blocks too.
       if (!viewSchema.blocks.some((b) => b.id === blockId)) return;
+      logEvent("block-actions", { blockId });
       dismissRecentEdit();
       setSelectedId(blockId);
       setIntentGate({ target: { kind: "block", id: blockId } });

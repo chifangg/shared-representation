@@ -185,6 +185,10 @@ export interface ConnectionOption {
   /** Arrow label to apply when kind="block_level". Only meaningful when
    *  target.kind === "arrow". Optional otherwise. */
   label?: string;
+  /** True when the user typed this option themselves ("Something else").
+   *  The interaction log must then record a length, never the title,
+   *  which holds the user's own prompt text. */
+  custom?: boolean;
 }
 
 // ---------------------------------------------------------------------------

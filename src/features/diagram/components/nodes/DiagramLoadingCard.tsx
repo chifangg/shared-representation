@@ -10,8 +10,10 @@ export function DiagramLoadingCard({ startedAt }: { startedAt: number }) {
   // Colors follow the app's HEADER chrome (#DCDBD6 band, #33322F ink):
   // this card is chrome talking about progress, not diagram content, so it
   // wears the chrome palette instead of adding one more color family.
+  // Opaque chrome card, deliberately NOT frosted: over the dark scrim the
+  // translucent glass read as a murky grey slab instead of a surface.
   return (
-    <div className="glass-card flex w-72 flex-col items-center gap-3 rounded-2xl px-6 py-4">
+    <div className="flex w-72 flex-col items-center gap-3 rounded-2xl border border-[#C9C8C3] bg-[#F4F3F0] px-6 py-4 shadow-[0_18px_40px_-18px_rgba(41,36,32,0.45)]">
       <div className="flex items-center gap-2 text-sm">
         <Loader2
           className="h-4 w-4 animate-spin text-[#6E6D68]"

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "@xyflow/react";
+import { logEvent } from "@/core/interactionLog";
 import {
   X,
   Loader2,
@@ -149,6 +150,14 @@ export function CapabilityDetailCard({
 
   const runPreview = () => {
     if (!canPreview) return;
+    // The button disables while previewing, but the Cmd/Ctrl+Enter path
+    // lands here directly; without this guard it double-fires the fetch
+    // (and the log event) mid-flight.
+    if (phase === "previewing") return;
+    logEvent("detail-preview", {
+      functionName,
+      textLen: changeText.length,
+    });
     setPhase("previewing");
     setError("");
     previewFunctionChange({ functionName, files, instruction: changeText })
@@ -174,6 +183,12 @@ export function CapabilityDetailCard({
     // Concise chat summary: lead with what the user asked to change, not the
     // block/function boilerplate that the full instruction needs for Claude.
     const summary = changeText || `${displayLabel} behaviour changed`;
+    // Logged here, beside detail-preview, so both measure the user's own
+    // typed text (the composed instruction adds template boilerplate).
+    logEvent("detail-apply", {
+      functionName,
+      textLen: changeText.length,
+    });
     onConfirm(finalInstruction, summary);
   };
 
@@ -268,8 +283,12 @@ export function CapabilityDetailCard({
   }
   const placed = placedRef.current;
   const ready = placed !== null;
-  const cardLeft = placed ? placed.x * zoom + tx : ax;
-  const cardTop = placed ? placed.y * zoom + ty : ay;
+  // Reprojected each render, CLAMPED to the pane (same guard as the
+  // connection lens note): the note is fixed-pixel text glued to a flow
+  // point, and a camera move after placement would otherwise drag it over
+  // the pane edge where it clips mid-word.
+  const cardLeft = placed ? clampX(placed.x * zoom + tx) : ax;
+  const cardTop = placed ? clampY(placed.y * zoom + ty) : ay;
   const side: Side = placed?.side ?? "right";
   const maxHeight = Math.max(220, paneH - cardTop - MARGIN);
 
@@ -340,9 +359,13 @@ export function CapabilityDetailCard({
         </svg>
       )}
 
+      {/* Annotation, not a card: same written-on-the-canvas language as
+       *  the connection lens note (left margin rule, no surface chrome).
+       *  The card version read as a floating form; this reads as a note
+       *  pulled out of the bubble. */}
       <div
         ref={cardRef}
-        className={`glass-card absolute z-50 flex flex-col rounded-2xl ${
+        className={`bubble-note-halo absolute z-50 flex flex-col border-l-2 border-[#DCD4C4] pl-3.5 ${
           ready ? "bubble-card-in" : ""
         }`}
         style={{
@@ -356,28 +379,27 @@ export function CapabilityDetailCard({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header. No hairline underneath: spacing separates it from the
-         *  prose, and the full-width rules were what made the card read as
-         *  a stacked form instead of one note. */}
-        <div className="flex shrink-0 items-start gap-2 px-4 pb-1 pt-3.5">
+        {/* Headline: the block name as a tinted chip (the lens note's
+         *  vocabulary) with the capability title under it. */}
+        <div className="flex shrink-0 items-start gap-2 pb-1">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[10.5px] font-medium uppercase tracking-wider text-[#A89D8E]">
+            <span className="inline-block max-w-full truncate rounded bg-[#EAE4D8] px-1.5 py-0.5 text-[11px] font-medium text-[#6E6353]">
               {blockLabel}
-            </div>
-            <div className="mt-0.5 truncate text-[15px] font-semibold text-[#2A2622]">
+            </span>
+            <div className="mt-1 truncate text-[15px] font-semibold text-[#2A2622]">
               {displayLabel}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 text-[#999] transition-colors hover:bg-[#F0EBE2] hover:text-[#555]"
+            className="rounded p-1 text-[#999] transition-colors hover:bg-black/[0.05] hover:text-[#555]"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3.5 pt-2">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-1 pr-1 pt-1">
           {phase === "loading" && (
             <div className="flex items-center gap-2 py-6 text-sm text-[#8A8276]">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -451,7 +473,7 @@ export function CapabilityDetailCard({
                   }}
                   rows={2}
                   placeholder="Describe the change…"
-                  className="w-full resize-none rounded-xl border border-white/70 bg-white/80 px-3 py-2.5 text-[13px] leading-snug text-[#2A2622] outline-none transition-colors placeholder:text-[#B5AFA4] focus:border-[#C9B58E]"
+                  className="w-full resize-none rounded-lg border border-[#E3DCCD] bg-white/60 px-3 py-2.5 text-[13px] leading-snug text-[#2A2622] outline-none transition-colors placeholder:text-[#B5AFA4] focus:border-[#C9B58E] focus:bg-white/90"
                 />
               </div>
 
@@ -479,7 +501,7 @@ export function CapabilityDetailCard({
           phase === "previewing" ||
           phase === "preview" ||
           phase === "error") && (
-          <div className="flex shrink-0 items-center justify-end gap-2 px-4 pb-3 pt-1">
+          <div className="flex shrink-0 items-center justify-end gap-2 pb-0.5 pr-1 pt-2">
             {phase === "preview" ? (
               <>
                 <button

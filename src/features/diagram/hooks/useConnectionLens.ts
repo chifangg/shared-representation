@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
+import { logEvent } from "@/core/interactionLog";
 import type { ConnectionLensDetail } from "../types";
 import { NODE_H, NODE_W } from "../layout/constants";
 import { useDiagramBusSubscribe } from "../protocol/bus";
@@ -49,6 +50,11 @@ export function useConnectionLens(projectKey: number) {
 
   useDiagramBusSubscribe("connection-lens", (detail) => {
     if (!detail) return;
+    logEvent("lens-open", {
+      from: detail.from,
+      to: detail.to,
+      verb: detail.verb,
+    });
     setActive(true);
     window.clearTimeout(timerRef.current);
     // Remember where we were so closing can return there. Only capture on a
@@ -112,6 +118,7 @@ export function useConnectionLens(projectKey: number) {
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
   const close = useCallback(() => {
+    logEvent("lens-close", {});
     window.clearTimeout(timerRef.current);
     setLens(null);
     setActive(false);

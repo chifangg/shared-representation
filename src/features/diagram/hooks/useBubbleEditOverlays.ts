@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useReactFlow, useStore, type Node } from "@xyflow/react";
+import { logEvent } from "@/core/interactionLog";
 import { BUBBLE_HALF_SIZE } from "../layout/bubbleNodes";
 import {
   CARD_GAP,
@@ -95,6 +96,10 @@ export function useBubbleEditOverlays(projectKey: number) {
         enterDy?: number;
       };
       if (!d.parentBlockId || !d.label) return;
+      logEvent("bubble-open", {
+        blockId: d.parentBlockId,
+        functionName: d.label,
+      });
 
       const w = node.measured?.width ?? BUBBLE_HALF_SIZE * 2;
       const h = node.measured?.height ?? BUBBLE_HALF_SIZE * 2;

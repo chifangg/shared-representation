@@ -30,6 +30,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useProject } from "@/core/project";
 import { useChatActivity } from "@/core/chatActivity";
+import { logEvent } from "@/core/interactionLog";
 import { DiagramActionEntry } from "./overlays/DiagramActionEntry";
 import {
   type BlockCategory,
@@ -177,6 +178,11 @@ function DiagramCanvasInner({
       for (const c of changes) {
         if (c.type === "position" && c.position) {
           userPositionsRef.current.set(c.id, c.position);
+          // One event per completed drag (React Flow marks the final
+          // position change with dragging=false), not per move tick.
+          if (c.dragging === false) {
+            logEvent("block-drag", { blockId: c.id });
+          }
         }
       }
       onNodesChange(changes);
@@ -350,6 +356,14 @@ function DiagramCanvasInner({
         />
       ),
     });
+    // Same dedupe key as the chat entry: the effect can re-run without a
+    // new settle (StrictMode, dep identity), and one settle = one event.
+    logEvent(
+      "diagram-updated",
+      { blocks: labels },
+      "agent",
+      `diagram-updated:${seq}:${labels.join("|")}`,
+    );
     // NOTE: the tracker's "edited" row is NOT recorded here. Card edits (block
     // "..." / bubble) are recorded immediately from the known target in the
     // option-executed subscriber above; typed-chat edits come from the
@@ -735,10 +749,23 @@ function DiagramCanvasInner({
   // Double-clicking empty canvas used to add a new block; that shortcut was
   // removed because it fired by accident. Add block via the labelled button.
   const onPaneClick = useCallback(() => {
+    // Sequence-analysis boundary marker: a pane click ends whatever the
+    // user was inspecting. Recording WHAT it closed lets the timeline
+    // draw it as the closing half of the pair (a bare pane click on
+    // nothing is just a click).
+    logEvent("pane-click", {
+      closed: expandedBlockId
+        ? "fan"
+        : tracedStep
+          ? "trace"
+          : selectedId
+            ? "selection"
+            : "none",
+    });
     setSelectedId(null);
     clearBubbles();
     clearTrace();
-  }, [clearBubbles, clearTrace]);
+  }, [expandedBlockId, tracedStep, selectedId, clearBubbles, clearTrace]);
 
   // Diff-on-ready glow handled by useRecentChanges above.
   // Settle effect (arrow outcomes, regen, edit-summary) handled below.
@@ -866,7 +893,10 @@ function DiagramCanvasInner({
           state={state}
           hasFiles={files.length > 0}
           nodeCount={nodes.length}
-          onRetry={() => setRetryNonce((n) => n + 1)}
+          onRetry={() => {
+            logEvent("diagram-retry", {});
+            setRetryNonce((n) => n + 1);
+          }}
         />
         {/* Tracker tray: a dropdown anchored (fixed) beneath the Tracker
          *  header button via trackerBtnRef, so it reads as belonging to that
@@ -882,14 +912,21 @@ function DiagramCanvasInner({
               // ring + zooms back out via useTraceFit); a different row moves
               // the trace to that block.
               if (tracker.selectedId === e.id) {
+                logEvent("trace-clear", { seq: e.seq });
                 trackerSelect(null);
                 setTracedStep(null);
               } else {
+                logEvent("trace-step", {
+                  seq: e.seq,
+                  kind: e.kind,
+                  blockIds: e.blockIds,
+                });
                 trackerSelect(e.id);
                 setTracedStep({ blockIds: e.blockIds, bubble: e.bubble });
               }
             }}
             onClose={() => {
+              logEvent("tracker-toggle", { open: false });
               // Closing the tray ends the trace-back too, so no orphan ring
               // lingers on the canvas with no tray to explain it.
               setTrackerOpen(false);
@@ -946,6 +983,10 @@ function DiagramCanvasInner({
               count={tracker.entries.length}
               open={trackerOpen}
               onToggle={() => {
+                logEvent("tracker-toggle", {
+                  open: !trackerOpen,
+                  entries: tracker.entries.length,
+                });
                 // Toggling the tray shut also ends the trace-back.
                 if (trackerOpen) clearTrace();
                 setTrackerOpen((o) => !o);
@@ -976,11 +1017,22 @@ function DiagramCanvasInner({
           <ColorSchemeLegend
             schemes={color.schemes}
             active={color.active}
-            onSelect={color.setActiveId}
+            onSelect={(id) => {
+              // Re-clicking the active scheme is a no-op, not a switch.
+              if (id !== color.active.id) {
+                logEvent("scheme-switch", { schemeId: id });
+              }
+              color.setActiveId(id);
+            }}
             blocks={state.schema.blocks}
-            onGenerate={(instruction) =>
-              color.generate(state.schema.blocks, instruction)
-            }
+            onGenerate={(instruction) => {
+              // null instruction = the "suggest an encoding for me" path.
+              logEvent("scheme-generate", {
+                textLen: instruction?.length ?? 0,
+                suggested: instruction === null,
+              });
+              color.generate(state.schema.blocks, instruction);
+            }}
             generating={color.generating}
             genError={color.genError}
             onClearGenError={color.clearGenError}
@@ -1005,8 +1057,20 @@ function DiagramCanvasInner({
             files={files}
             detail={bubbleEdit.detail}
             settled={bubbleEdit.settled}
-            onCloseDetail={bubbleEdit.closeDetail}
+            onCloseDetail={() => {
+              // Abandonment marker. Wrapped HERE, not inside closeDetail:
+              // the confirm path below also closes, and an apply must not
+              // count as a cancel.
+              logEvent("detail-cancel", {
+                blockId: bubbleEdit.detail?.blockId,
+                functionName: bubbleEdit.detail?.functionName,
+              });
+              bubbleEdit.closeDetail();
+            }}
             onConfirmDetail={(blockId, instruction, summary) => {
+              // detail-apply is logged inside CapabilityDetailCard, next to
+              // detail-preview, so both measure the user's own typed text
+              // rather than the composed instruction.
               visualEdit.dispatchExecuteDirect(
                 { kind: "block", id: blockId },
                 instruction,
@@ -1073,8 +1137,12 @@ function DiagramCanvasInner({
           onWidthChange={setPanelWidth}
           // Closing the panel means leaving focus mode (same as the toggle).
           // `focused` is intentionally kept so returning restores the view.
-          onClose={() => onViewChange("overview")}
+          onClose={() => {
+            logEvent("focus-mode", { on: false, via: "panel" });
+            onViewChange("overview");
+          }}
           onPromote={(b) => {
+            logEvent("promote", { blockId: b.id, label: b.label });
             // NOTE: promoting adds a node + arrow to the merged schema, so
             // dagre re-lays-out the whole graph and unrelated blocks can
             // shift slightly (an arrow visibly re-routing). We do NOT pin all
@@ -1161,6 +1229,7 @@ function DiagramCanvasInner({
             recorder.recordPromote(b, cat);
           }}
           onUnpromote={(b) => {
+            logEvent("unpromote", { blockId: b.id, label: b.label });
             setPromoted((prev) => ({
               blocks: prev.blocks.filter((x) => x.id !== b.id),
               arrows: prev.arrows.filter(
@@ -1183,7 +1252,13 @@ function DiagramCanvasInner({
        *  purpose: otherwise the opening panel would shove it left, making the
        *  user chase it to switch back. */}
       {state.kind === "ready" && (
-        <DiagramControls view={view} onViewChange={onViewChange} />
+        <DiagramControls
+          view={view}
+          onViewChange={(v) => {
+            logEvent("focus-mode", { on: v === "focus", via: "toggle" });
+            onViewChange(v);
+          }}
+        />
       )}
     </div>
   );

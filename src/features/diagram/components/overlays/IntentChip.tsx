@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { logEvent } from "@/core/interactionLog";
 import type { IntentSelection } from "../../types";
 import { VERBS } from "./IntentSurvey";
 import { intentSummary } from "./IntentSurveySteps";
@@ -53,7 +54,12 @@ export function IntentChip({
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          // Consulting the intent chip is a pure inspection act; the study
+          // wants to see who checks their stated focus and how often.
+          logEvent("intent-chip-toggle", { open: !open });
+          setOpen((v) => !v);
+        }}
         aria-expanded={open}
         title="Your current focus. Click to see what the diagram is emphasizing."
         className={`flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2 transition-colors ${
@@ -92,7 +98,13 @@ export function IntentChip({
       {render && (
         <>
           {/* Click-away catcher. */}
-          <div className="fixed inset-0 z-[59]" onClick={() => setOpen(false)} />
+          <div
+            className="fixed inset-0 z-[59]"
+            onClick={() => {
+              logEvent("intent-chip-toggle", { open: false });
+              setOpen(false);
+            }}
+          />
           {/* Flush against the chip (no gap) and sharing its left edge, so the
            *  two read as one surface. Grows down out of the chip on open and
            *  folds back up on close (transform-origin at the top). */}

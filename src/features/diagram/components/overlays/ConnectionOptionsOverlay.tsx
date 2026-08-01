@@ -45,6 +45,7 @@ export function ConnectionOptionsOverlay({
       title: trimmed,
       detail: "User-described change.",
       kind: "detail",
+      custom: true,
     });
   };
 

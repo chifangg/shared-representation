@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dagre from "@dagrejs/dagre";
+import { logEvent } from "@/core/interactionLog";
 import {
   Background,
   ReactFlow,
@@ -58,9 +59,13 @@ export function FocusMiniGraph({
       // Ghost nodes (focused base re-stamped at the top) aren't
       // expandable here — they belong to the main canvas.
       if (node.id.startsWith("ghost-")) return;
+      logEvent("panel-detail-click", {
+        blockId: node.id,
+        outcome: selectedMiniId === node.id ? "collapse" : "expand",
+      });
       setSelectedMiniId((prev) => (prev === node.id ? null : node.id));
     },
-    [],
+    [selectedMiniId],
   );
   const onMiniPaneClick = useCallback(() => {
     setSelectedMiniId(null);

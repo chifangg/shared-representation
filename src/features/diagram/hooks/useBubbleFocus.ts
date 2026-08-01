@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useReactFlow, type Node } from "@xyflow/react";
+import { logEvent } from "@/core/interactionLog";
 import type { DiagramBlock } from "../types";
 import { NODE_H, NODE_W } from "../layout/constants";
 import {
@@ -178,10 +179,17 @@ export function useBubbleFocus({
     // nothing happens".
     const block = blocks.find((b) => b.id === id);
     if (!block || bubbleItemsForBlock(block).length === 0) {
+      // Logged with its outcome: a click that visibly does nothing is
+      // still a click the study wants to see.
+      logEvent("node-click", { blockId: id, outcome: "no-caps" });
       // Still collapse if this block is the one currently expanded.
       if (expandedBlockId === id) setExpandedBlockId(null);
       return;
     }
+    logEvent("node-click", {
+      blockId: id,
+      outcome: expandedBlockId === id ? "fan-close" : "fan-open",
+    });
     setExpandedBlockId((prev) => (prev === id ? null : id));
   };
 

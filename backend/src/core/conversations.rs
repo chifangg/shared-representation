@@ -12,7 +12,9 @@
 //! `interaction_events` is the user-study telemetry sink: the frontend
 //! batches UI events to `POST /api/log` and analysis reads this table
 //! straight out of the db file, joining transcripts via
-//! `chat_session` = `conversations.id`.
+//! `chat_session` = `conversations.id`. Both `ts` (client clock) and
+//! `server_ts` (arrival) are unix MILLISECONDS; sequence analysis sorts
+//! on client `ts` and uses `server_ts` only to sanity-check clock skew.
 //!
 //! A *conversation* is a single Claude subprocess lifetime keyed by the
 //! client-generated `session_id` (same UUID we pass through to
@@ -263,7 +265,10 @@ impl ConversationStore {
         cookie: &str,
         events: &[InteractionEventIn],
     ) -> Result<usize> {
-        let now = now_secs();
+        // Milliseconds, matching the client `ts` in the same row. The rest
+        // of this module keeps second precision; only this table mixes the
+        // two clocks side by side, where mixed UNITS burned the analysis.
+        let now = now_ms();
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction()?;
         {
@@ -507,6 +512,13 @@ fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
 

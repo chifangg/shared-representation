@@ -59,6 +59,22 @@
   isolation: isolate;
   animation: annot-note-in 220ms ease-out 140ms both;
 }
+/* Same feathered paper halo for the bubble detail note, which shares the
+   written-on-canvas language. Always on there: its placement can fall
+   back over the parent block when the fan opened against a pane edge,
+   and the note carries form controls whose legibility must not depend on
+   what happens to sit underneath. */
+.bubble-note-halo::before {
+  content: "";
+  position: absolute;
+  inset: -12px -16px;
+  z-index: -1;
+  border-radius: 16px;
+  background: #fcfbf9;
+  opacity: 0.92;
+  filter: blur(7px);
+}
+
 /* Feathered halo: enough to keep ink readable over gray arrows and tinted
    blocks, soft enough that it never reads as a card edge. */
 .margin-note.note-halo::before {
