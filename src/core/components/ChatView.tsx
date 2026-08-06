@@ -30,7 +30,6 @@ import {
   SquarePen,
 } from "lucide-react";
 import { useProject, buildChatSystemPrompt } from "@/core/project";
-import { getStudyMode } from "@/core/studyMode";
 import {
   ArrowsAddedSink,
   OptionsHandoff,
@@ -76,18 +75,11 @@ export function ChatView({ model }: { model?: string }) {
 
   // Stamp interaction-log rows with the conversation id so analysis
   // can join them onto the persisted transcript. The study condition is
-  // logged here too (once per conversation, after the session id binds)
-  // so every session can be attributed to its group.
+  // logged at project upload (see loadFiles), NOT here: binding happens
+  // on every page load, and logging it here minted a junk one-event
+  // session for every reload.
   useEffect(() => {
     setLogContext({ sessionId: session.sessionId });
-    if (session.sessionId) {
-      logEvent(
-        "study-mode",
-        { mode: getStudyMode() },
-        "system",
-        `study-mode:${session.sessionId}`,
-      );
-    }
   }, [session.sessionId]);
 
   const handleNewChat = () => {

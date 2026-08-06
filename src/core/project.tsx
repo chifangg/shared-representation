@@ -30,6 +30,7 @@ import {
   syncWrite,
 } from "@/core/folderSync";
 import { shouldIgnorePath } from "@/core/projectIgnore";
+import { getStudyMode } from "@/core/studyMode";
 
 /**
  * Client-side project upload + display, used by the Files and Code
@@ -138,6 +139,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   );
 
   const loadFiles = useCallback((entries: FileEntry[]) => {
+    // The study condition rides with the upload: an upload is the real
+    // start of a run, so every run's data is self-describing, and idle
+    // page loads leave no trace at all.
+    logEvent("study-mode", { mode: getStudyMode() }, "system");
     logEvent("project-upload", {
       fileCount: entries.length,
       totalBytes: entries.reduce((n, f) => n + f.size, 0),
