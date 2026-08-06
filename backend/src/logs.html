@@ -51,6 +51,7 @@
   #tl-svg .lane-label { font-size: 11px; font-weight: 600; fill: #6B6256; }
   .tl-key { display: inline-flex; align-items: center; gap: 5px; margin-right: 10px; font-size: 11px; color: #6B6256; }
   .tl-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; }
+  .lane-dot { width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid; display: inline-block; margin-right: 7px; vertical-align: 1px; }
 </style>
 </head>
 <body>
@@ -188,7 +189,39 @@ function updateSessionContext(sidFilter, rows) {
   tlBtn.textContent = "timeline";
   tlBtn.onclick = () => navigate("timeline", fullSid);
   strip.appendChild(tlBtn);
+  strip.appendChild(exportButton(fullSid));
   strip.hidden = false;
+}
+
+/* One-click research bundle: events + distilled transcript + participant
+   + study mode, downloaded as a JSON file named after the session. */
+function exportButton(sid) {
+  const b = document.createElement("button");
+  b.textContent = "export JSON";
+  b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const res = await fetch(
+        `/api/log/session/${encodeURIComponent(sid)}/export?${qs({ token })}`,
+      );
+      const body = await res.json();
+      if (!body.success) { alert(body.error || "export failed"); return; }
+      const data = body.data;
+      const name = `session-${data.session.slice(0, 8)}${
+        data.participant ? "-" + data.participant : ""
+      }.json`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(
+        new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+      );
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally {
+      b.disabled = false;
+    }
+  };
+  return b;
 }
 
 async function loadSessions() {
@@ -302,7 +335,21 @@ function render(rows) {
 
     tr.appendChild(td(String(r.id), "mono muted"));
     tr.appendChild(td(fmt(r.ts), "mono"));
-    tr.appendChild(td(r.event, "mono"));
+    // Lane dot before the event name: the same colour and fill the
+    // timeline uses, so a row in the table and a dot in the strip are
+    // recognisably the same thing.
+    const evTd = document.createElement("td");
+    evTd.className = "mono";
+    const lane = LANES.find((l) => l.key === laneOf(r)) || LANES[3];
+    const hollow = isHollow(r);
+    const dot = document.createElement("span");
+    dot.className = "lane-dot";
+    dot.style.background = hollow ? "transparent" : lane.color;
+    dot.style.borderColor = lane.color;
+    dot.title = lane.label + (hollow ? " (cancel / close)" : "");
+    evTd.appendChild(dot);
+    evTd.appendChild(document.createTextNode(r.event));
+    tr.appendChild(evTd);
     // The source value arrives from an unauthenticated ingest endpoint,
     // so it must never touch innerHTML (stored XSS). textContent for the
     // value; the styling class only when it is one of the known sources.
@@ -468,6 +515,7 @@ function renderTimeline(rows) {
   evBtn.textContent = "table view";
   evBtn.onclick = () => navigate("events", tlSid);
   strip.appendChild(evBtn);
+  strip.appendChild(exportButton(tlSid));
   for (const lane of LANES) {
     const k = document.createElement("span");
     k.className = "tl-key";

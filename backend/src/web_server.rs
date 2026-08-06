@@ -208,6 +208,10 @@ pub async fn create_web_server(
             axum::routing::post(crate::logging::assign_session_participant),
         )
         .route(
+            "/api/log/session/{sid}/export",
+            get(crate::logging::export_session_log),
+        )
+        .route(
             "/api/log/sessions",
             get(crate::logging::list_log_sessions),
         )

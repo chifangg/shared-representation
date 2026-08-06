@@ -256,6 +256,64 @@ impl ConversationStore {
         Ok(rows)
     }
 
+    /// Admin-side message fetch for the research export. Deliberately NO
+    /// cookie guard: the caller gates on the admin token instead, since
+    /// the researcher exporting a participant's session is never that
+    /// participant's browser.
+    pub async fn messages_for_export(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<MessageRow>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, ts, kind, content_json \
+             FROM messages WHERE conversation_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![conversation_id], |r| {
+                let content_str: String = r.get(4)?;
+                let content = serde_json::from_str::<serde_json::Value>(&content_str)
+                    .unwrap_or(serde_json::Value::Null);
+                Ok(MessageRow {
+                    id: r.get(0)?,
+                    conversation_id: r.get(1)?,
+                    ts: r.get(2)?,
+                    kind: r.get(3)?,
+                    content_json: content,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Resolve a session id that may be the 8-char prefix the viewer
+    /// displays. Exact match wins over a prefix match.
+    pub async fn resolve_conversation_id(&self, sid: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let full: Option<String> = conn
+            .query_row(
+                "SELECT id FROM conversations WHERE id = ?1 OR id LIKE ?2 \
+                 ORDER BY (id = ?1) DESC LIMIT 1",
+                params![sid, format!("{sid}%")],
+                |r| r.get(0),
+            )
+            .ok();
+        Ok(full)
+    }
+
+    /// Participant label assigned to a session, if any.
+    pub async fn participant_for_session(&self, sid: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        let p: Option<String> = conn
+            .query_row(
+                "SELECT participant FROM session_participants WHERE chat_session = ?1",
+                params![sid],
+                |r| r.get(0),
+            )
+            .ok();
+        Ok(p)
+    }
+
     /// Batch-insert interaction events for one guest cookie in a single
     /// transaction (the store shares one connection behind a mutex, so
     /// per-row inserts would hold the lock N times). Returns the count

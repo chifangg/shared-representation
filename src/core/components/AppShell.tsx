@@ -18,6 +18,7 @@ import {
   useProject,
 } from "@/core/project";
 import { DiagramCanvas, type DiagramView } from "@/features/diagram";
+import { getStudyMode } from "@/core/studyMode";
 
 /**
  * LAYOUT NOTE, learned the hard way: dragging a separator used to lag the
@@ -94,20 +95,29 @@ export function AppShell() {
           className="h-full transition-[margin] duration-200 ease-out"
           style={{ marginLeft: railW + codeW }}
         >
-          <Group
-            groupRef={groupRef}
-            orientation="horizontal"
-            className="h-full"
-          >
-            <Panel id="chat" defaultSize={38} minSize={14}>
-              <ChatView />
-            </Panel>
-            <ResizeHandle />
+          {/* Study baseline: the diagram panel is never MOUNTED, so the
+           *  app reads as plain chat + files + code. The mode is fixed
+           *  per page load (see studyMode.ts), so this is a static tree
+           *  choice, not the mid-session panel mount/unmount the layout
+           *  note above warns about. */}
+          {getStudyMode() === "baseline" ? (
+            <ChatView />
+          ) : (
+            <Group
+              groupRef={groupRef}
+              orientation="horizontal"
+              className="h-full"
+            >
+              <Panel id="chat" defaultSize={38} minSize={14}>
+                <ChatView />
+              </Panel>
+              <ResizeHandle />
 
-            <Panel id="diagram" defaultSize={62} minSize={30}>
-              <DiagramPanel />
-            </Panel>
-          </Group>
+              <Panel id="diagram" defaultSize={62} minSize={30}>
+                <DiagramPanel />
+              </Panel>
+            </Group>
+          )}
         </div>
       </div>
     </div>

@@ -23,6 +23,13 @@ import {
 import { Highlight, themes, type Language } from "prism-react-renderer";
 import Editor from "react-simple-code-editor";
 import { logEvent, setLogContext } from "@/core/interactionLog";
+import {
+  clearSyncHandle,
+  isFolderSyncSupported,
+  pickAndReadFolder,
+  syncWrite,
+} from "@/core/folderSync";
+import { shouldIgnorePath } from "@/core/projectIgnore";
 
 /**
  * Client-side project upload + display, used by the Files and Code
@@ -193,6 +200,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const name = path.split("/").pop() ?? path;
       return [...prev, { path, name, content, size: content.length }];
     });
+    // Mirror to disk when the project was opened with folder sync. This
+    // is the single choke point every file mutation flows through
+    // (Claude's write/edit tools and the code viewer alike), so syncing
+    // here keeps the on-disk clone current for the study's test runner.
+    syncWrite(path, content);
   }, []);
 
   const toggleHighlight = useCallback(() => {
@@ -202,6 +214,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const reset = useCallback(() => {
     logEvent("project-reset");
+    clearSyncHandle();
     setFiles([]);
     setOpenPaths([]);
     setActivePath(null);
@@ -279,53 +292,8 @@ export function useProject() {
 
 // --- upload helpers --------------------------------------------------------
 
-const IGNORED_DIR_NAMES = new Set([
-  "node_modules",
-  "bower_components",
-  "vendor",
-  ".git",
-  ".svn",
-  ".hg",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  ".nuxt",
-  ".turbo",
-  ".cache",
-  ".parcel-cache",
-  "__pycache__",
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  "venv",
-  ".venv",
-  "env",
-  ".env",
-  "target",
-  ".gradle",
-  ".idea",
-  ".vscode",
-  "coverage",
-  ".nyc_output",
-]);
-
-const IGNORED_FILE_NAMES = new Set([".DS_Store", "Thumbs.db"]);
-
-const IGNORED_FILE_EXTS = [".pyc", ".pyo", ".class", ".o", ".so", ".dll"];
-
-function shouldIgnorePath(path: string): boolean {
-  const parts = path.split("/");
-  for (const part of parts) {
-    if (IGNORED_DIR_NAMES.has(part)) return true;
-  }
-  const filename = parts[parts.length - 1] || "";
-  if (IGNORED_FILE_NAMES.has(filename)) return true;
-  for (const ext of IGNORED_FILE_EXTS) {
-    if (filename.endsWith(ext)) return true;
-  }
-  return false;
-}
+// Ignore rules live in projectIgnore.ts, shared with the folder-sync
+// picker without creating a project <-> folderSync import cycle.
 
 async function readFolderInput(
   files: FileList,
@@ -440,6 +408,7 @@ export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
 
   const onFolder = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
+    clearSyncHandle();
     setUploading(true);
     setUploadProgress(0);
     try {
@@ -452,9 +421,27 @@ export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
     }
   };
 
+  // Folder open through the File System Access picker: same read-in,
+  // plus a retained readwrite handle so every subsequent edit mirrors
+  // back to disk (see folderSync.ts). Chromium only; the hidden-input
+  // path below stays as the fallback for other browsers.
+  const onSyncFolder = async () => {
+    clearSyncHandle();
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const entries = await pickAndReadFolder(setUploadProgress);
+      if (entries && entries.length > 0) loadFiles(entries);
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
   const onZip = async (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    clearSyncHandle();
     setUploading(true);
     setUploadProgress(0);
     try {
@@ -473,22 +460,35 @@ export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
         compact ? "flex flex-col items-center gap-1 pt-2" : "flex flex-col text-xs"
       }
     >
-      <UploadButton
-        compact={compact}
-        icon={<FolderOpen size={compact ? 16 : 14} />}
-        label={uploading ? "Loading…" : "open folder"}
-      >
-        <input
-          type="file"
-          // @ts-expect-error webkitdirectory is non-standard but widely supported
-          webkitdirectory=""
-          directory=""
-          multiple
-          className="hidden"
-          onChange={onFolder}
-          disabled={uploading}
-        />
-      </UploadButton>
+      {isFolderSyncSupported() ? (
+        // Picker path: the folder stays connected, and every edit the
+        // agent or the user makes is written back to it on disk.
+        <UploadButton
+          compact={compact}
+          icon={<FolderOpen size={compact ? 16 : 14} />}
+          label={uploading ? "Loading…" : "open folder"}
+          onClick={uploading ? undefined : onSyncFolder}
+        >
+          {null}
+        </UploadButton>
+      ) : (
+        <UploadButton
+          compact={compact}
+          icon={<FolderOpen size={compact ? 16 : 14} />}
+          label={uploading ? "Loading…" : "open folder"}
+        >
+          <input
+            type="file"
+            // @ts-expect-error webkitdirectory is non-standard but widely supported
+            webkitdirectory=""
+            directory=""
+            multiple
+            className="hidden"
+            onChange={onFolder}
+            disabled={uploading}
+          />
+        </UploadButton>
+      )}
       {/* Hairline separates the two actions now that neither carries a
           border of its own. Inset so it reads as a rule inside the list,
           not an edge of the panel. Not needed in the rail, where they are
@@ -563,17 +563,22 @@ function UploadButton({
   label,
   children,
   compact = false,
+  onClick,
 }: {
   icon: ReactNode;
   label: string;
   children: ReactNode;
   /** Rail mode: icon only, label moves to the tooltip. */
   compact?: boolean;
+  /** Picker-style actions have no hidden input; the label itself is the
+   *  clickable control. */
+  onClick?: () => void;
 }) {
   if (compact) {
     return (
       <label
         title={label}
+        onClick={onClick}
         className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-[#3A3A38] transition-colors hover:bg-black/[0.06]"
       >
         {icon}
@@ -583,6 +588,7 @@ function UploadButton({
   }
   return (
     <label
+      onClick={onClick}
       className={`${PILL_BUTTON} flex w-full cursor-pointer items-center justify-start gap-2 whitespace-nowrap`}
     >
       {/* Icon sits a step back from the label so the pair reads as one
