@@ -54,7 +54,8 @@ import {
  */
 export function ChatView({ model }: { model?: string }) {
   const session = useClaudeSession({ model });
-  const { files, setChatMessages, setChatRunning, projectKey } = useProject();
+  const { files, setChatMessages, setChatRunning, projectKey, diagramBusy } =
+    useProject();
   const { entries: activityEntries, clear: clearActivity } = useChatActivity();
   const running = session.status === "running";
 
@@ -361,8 +362,13 @@ export function ChatView({ model }: { model?: string }) {
           logEvent("chat-cancel");
           session.cancel();
         }}
-        disabled={running || !hasFiles}
+        disabled={running || !hasFiles || diagramBusy}
         running={running}
+        placeholder={
+          diagramBusy
+            ? "Diagram is being drawn, chat opens when it settles…"
+            : undefined
+        }
         attachments={
           contextItems.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-1.5">

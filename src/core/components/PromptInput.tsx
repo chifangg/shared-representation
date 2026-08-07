@@ -11,9 +11,13 @@ export function PromptInput({
   disabled,
   running,
   attachments,
+  placeholder,
 }: {
   onSubmit: (prompt: string) => void;
   onCancel?: () => void;
+  /** Override for the idle placeholder, used to say WHY input is gated
+   *  (e.g. the diagram is still generating). */
+  placeholder?: string;
   disabled?: boolean;
   running?: boolean;
   /** Optional row rendered above the textarea, inside the input box
@@ -43,7 +47,7 @@ export function PromptInput({
       <textarea
         className="chat-input flex-1 resize-none overflow-y-auto rounded-lg border border-[#D9D7D2] bg-white px-3 py-2 text-[14px] leading-snug text-[#2E2A25] placeholder:text-[#AEADA8] outline-none focus:border-[#C4C2BB] disabled:opacity-60"
         style={{ maxHeight: MAX_INPUT_H }}
-        placeholder={running ? "Streaming…" : "Message…"}
+        placeholder={running ? "Streaming…" : placeholder ?? "Message…"}
         rows={1}
         value={value}
         disabled={disabled}

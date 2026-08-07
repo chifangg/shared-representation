@@ -129,7 +129,8 @@ function DiagramCanvasInner({
   headerSlot?: HTMLElement | null;
   headerRightSlot?: HTMLElement | null;
 }) {
-  const { files, chatMessages, chatRunning, projectKey } = useProject();
+  const { files, chatMessages, chatRunning, projectKey, setDiagramBusy } =
+    useProject();
   const bus = useDiagramBus();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -223,6 +224,15 @@ function DiagramCanvasInner({
     setEdges,
     preserveRegenRef,
   });
+
+  // Report generation-in-flight to the shell so the chat can gate on it:
+  // a turn sent while the structure stream is still landing races this
+  // state machine and wedges the canvas mid-generation. Cleared on
+  // unmount, so the baseline condition (no diagram mounted) never gates.
+  useEffect(() => {
+    setDiagramBusy(state.kind === "loading");
+    return () => setDiagramBusy(false);
+  }, [state.kind, setDiagramBusy]);
 
   // THE one merged "schema as the user sees it": base plus promoted.
   // Every label-resolving consumer reads these (bubbles, lens, gates,

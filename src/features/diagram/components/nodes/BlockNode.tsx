@@ -220,7 +220,10 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
         />
       ) : (
         <div
-          className="text-sm font-semibold leading-tight text-[#222222] cursor-text"
+          // break-words: labels sometimes carry an unbreakable token (a
+          // file path pasted from the user's prompt), which otherwise
+          // escapes the fixed-width card.
+          className="break-words text-sm font-semibold leading-tight text-[#222222] cursor-text"
           title={data.onLabelChange ? "Double-click to rename" : undefined}
           onDoubleClick={(e) => {
             if (!data.onLabelChange) return;
@@ -233,7 +236,7 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
       )}
       {data.caption && (
         <div
-          className={`mt-1 text-[11px] leading-snug text-[#666666] ${
+          className={`mt-1 break-words text-[11px] leading-snug text-[#666666] ${
             data.isExpanded ? "" : "line-clamp-2"
           }`}
         >

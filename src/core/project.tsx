@@ -103,6 +103,13 @@ type ProjectContextValue = {
    *  visual states on user edits. ChatView is the writer. */
   chatRunning: boolean;
   setChatRunning: (v: boolean) => void;
+  /** True while the diagram feature is mid-generation. The chat gates on
+   *  it: a turn sent while the structure stream is still landing races
+   *  the generation's state machine and wedges the canvas. The diagram
+   *  feature is the writer; stays false when the feature never mounts
+   *  (baseline condition), so chat is not gated there. */
+  diagramBusy: boolean;
+  setDiagramBusy: (v: boolean) => void;
   /** Bumps only on USER-initiated project changes (upload, reset). Does
    *  NOT change when Claude edits / writes individual files. Sibling
    *  components (diagram) depend on this to decide when to wipe + reload
@@ -126,6 +133,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     import("@/core/hooks/useClaudeSession").ClaudeMessage[]
   >([]);
   const [chatRunning, setChatRunning] = useState(false);
+  const [diagramBusy, setDiagramBusy] = useState(false);
   const [projectKey, setProjectKey] = useState(0);
 
   // Stamp interaction-log rows with the project boundary (bumps only
@@ -258,6 +266,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setChatMessages,
       chatRunning,
       setChatRunning,
+      diagramBusy,
+      setDiagramBusy,
       projectKey,
     }),
     [
@@ -281,6 +291,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       uploadProgress,
       chatMessages,
       chatRunning,
+      diagramBusy,
       projectKey,
     ],
   );
