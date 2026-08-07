@@ -11,10 +11,15 @@ uploaded project. The chat and the diagram drive each other:
   double-click empty canvas — the diagram dispatches a structured
   prompt and Claude either suggests options to pick from or executes
   the change directly.
+- **Open a folder in Chrome** and edits write back to the real files
+  on disk live, so an external test runner sees every change.
 
 It's a research prototype for **shared representations** between human
 and model: the chat is the model's surface, the diagram is the human's
 surface, and they stay in sync.
+
+> **Study participants:** you only need [INSTALL.md](INSTALL.md), the
+> one-time setup plus the session-day start command.
 
 ```
 ┌────────┬──────────┬────────────┬──────────────────┐
@@ -73,6 +78,21 @@ backend/                    Rust/Axum server, MCP tool-bridge, /api/diagram
 docs/                       narrative documentation
 ```
 
+## Study instrumentation
+
+The prototype doubles as the apparatus for a between-subjects user
+study. Everything below is built in and stays on the host machine:
+
+- `?mode=tool` / `?mode=baseline` selects the condition per browser
+  (baseline hides the diagram entirely); the active mode is logged
+  with every project upload.
+- Every user interaction (chat, files, diagram) lands as a typed,
+  timestamped event in a local SQLite table, alongside the full
+  conversation transcripts.
+- `/logs?token=…` is the researcher view: live event stream, per-session
+  timeline visualization, participant assignment, and one-click JSON
+  export of a session's events plus transcript.
+
 ## Configuration
 
 | Env var                     | Default | Purpose                                             |
@@ -80,6 +100,9 @@ docs/                       narrative documentation
 | `ANTHROPIC_API_KEY`         | —       | Claude API key for `claude-ui-app`                  |
 | `VITE_DIAGRAM_DEBUG`        | empty   | Dev-only logger scopes (`*` for all). See below.    |
 | `APP_CLIENT_TOOL_TIMEOUT_SECS` | 120  | How long Claude waits for a client tool response    |
+| `APP_DB_PATH`               | `~/.claude-ui-app/app.db` | SQLite location (conversations + interaction log) |
+| `APP_LOG_ADMIN_TOKEN`       | unset (open) | Gates the `/logs` viewer and its API when set  |
+| `APP_SESSION_KEY`           | ephemeral | Signing key for guest-session cookies; set for persistence across restarts |
 
 Diagram debug scopes:
 
