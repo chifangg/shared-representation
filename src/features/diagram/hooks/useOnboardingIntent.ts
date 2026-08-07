@@ -35,13 +35,17 @@ export function useOnboardingIntent({
    *  Setting userGoal (from null) lets the structure fetch fire. */
   const complete = useCallback(
     (goal: string, selection: IntentSelection) => {
-      // Verb + counts only: the composed goal and free-text answers stay
-      // out of the log (policy: lengths, not bodies).
+      // Deliberate exception to the lengths-not-bodies policy: the goal
+      // text reaches only the diagram request, which is never persisted,
+      // so unlike chat prompts it has NO transcript backup. It is short,
+      // it is the participant's stated intent (analytically central), so
+      // the event carries it verbatim.
       logEvent("survey-submit", {
         verb: selection.verb,
         caps: selection.capabilities.length,
         understandCaps: selection.understandCaps.length,
         goalLen: goal.length,
+        goal: goal.slice(0, 300),
       });
       setIntent(selection);
       setUserGoal(goal);
@@ -58,6 +62,8 @@ export function useOnboardingIntent({
         verb: selection.verb,
         changed: goal !== userGoal,
         goalLen: goal.length,
+        // Same exception as survey-submit: no transcript backup exists.
+        goal: goal.slice(0, 300),
       });
       setEditingIntent(false);
       setIntent(selection);

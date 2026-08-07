@@ -232,6 +232,10 @@ pub struct SessionExport {
 /// boundary + success). The CLI may re-emit the SAME assistant message
 /// id as its content grows, so assistant entries are deduped by message
 /// id keeping the LAST version, in first-seen order.
+///
+/// Timestamps are emitted in MILLISECONDS to match the `events` array in
+/// the same export (messages store seconds internally); one unit per file
+/// keeps the analysis join trivial.
 fn distill_transcript(rows: &[MessageRow]) -> Vec<Value> {
     // (key, value) pairs in first-seen order; re-seen keys update in place.
     let mut order: Vec<String> = Vec::new();
@@ -261,7 +265,7 @@ fn distill_transcript(rows: &[MessageRow]) -> Vec<Value> {
                     &mut order,
                     &mut by_key,
                     None,
-                    json!({ "ts": m.ts, "role": "user", "text": text }),
+                    json!({ "ts": m.ts * 1000, "role": "user", "text": text }),
                 );
             }
             "stream" => {
@@ -314,7 +318,7 @@ fn distill_transcript(rows: &[MessageRow]) -> Vec<Value> {
                             &mut order,
                             &mut by_key,
                             id,
-                            json!({ "ts": m.ts, "role": "assistant", "text": text, "tools": tools }),
+                            json!({ "ts": m.ts * 1000, "role": "assistant", "text": text, "tools": tools }),
                         );
                     }
                     Some("result") => {
@@ -327,7 +331,7 @@ fn distill_transcript(rows: &[MessageRow]) -> Vec<Value> {
                             &mut by_key,
                             None,
                             json!({
-                                "ts": m.ts,
+                                "ts": m.ts * 1000,
                                 "role": "result",
                                 "success": success,
                                 "duration_ms": inner.get("duration_ms"),
