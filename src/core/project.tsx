@@ -23,6 +23,7 @@ import {
 import { Highlight, themes, type Language } from "prism-react-renderer";
 import Editor from "react-simple-code-editor";
 import { logEvent, setLogContext } from "@/core/interactionLog";
+import { Markdown } from "@/core/components/Markdown";
 import {
   clearSyncHandle,
   isFolderSyncSupported,
@@ -414,6 +415,18 @@ export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
   const onFolder = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     clearSyncHandle();
+    // This path has NO write-back handle. Record why the picker path was
+    // not available, so a "not synced" session is diagnosable from the
+    // log alone (missing API vs insecure origin vs unusual browser).
+    logEvent(
+      "folder-open-fallback",
+      {
+        pickerSupported: isFolderSyncSupported(),
+        secureContext: window.isSecureContext,
+        ua: navigator.userAgent.slice(0, 120),
+      },
+      "system",
+    );
     setUploading(true);
     setUploadProgress(0);
     try {
@@ -436,7 +449,13 @@ export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
     setUploadProgress(0);
     try {
       const entries = await pickAndReadFolder(setUploadProgress);
-      if (entries && entries.length > 0) loadFiles(entries);
+      if (entries && entries.length > 0) {
+        loadFiles(entries);
+      } else if (entries === null) {
+        // Cancelled or permission denied: no project change, but leave a
+        // trace so an aborted arm-sync attempt is visible in the log.
+        logEvent("folder-pick-cancelled", {}, "system");
+      }
     } finally {
       setUploading(false);
       setUploadProgress(0);
@@ -512,6 +531,16 @@ export function UploadArea({ compact = false }: { compact?: boolean } = {}) {
           disabled={uploading}
         />
       </UploadButton>
+      {/* Loud, up-front browser warning. Without the File System Access
+       *  API every edit stays in the browser, which silently breaks the
+       *  study's on-disk test runner; a participant must see this BEFORE
+       *  uploading, not discover it from a stale test run. */}
+      {!isFolderSyncSupported() && !compact && (
+        <div className="mx-3 mt-2 rounded-md bg-[#F4E7C8] px-2 py-1.5 text-[11px] leading-snug text-[#6B4E14]">
+          This browser cannot write edits back to your folder. Use Google
+          Chrome for live file sync.
+        </div>
+      )}
     </div>
   );
 }
@@ -808,6 +837,13 @@ export function CodeViewer() {
   const codeEditLogTimer = useRef<number | null>(null);
   const code = activeFile?.content ?? "";
   const lang = languageFromPath(activeFile?.path ?? "");
+  const isMd = (activeFile?.path ?? "").toLowerCase().endsWith(".md");
+  // Rendered-vs-source for markdown files; back to rendered whenever the
+  // active file changes, so each .md opens readable first.
+  const [mdSource, setMdSource] = useState(false);
+  useEffect(() => {
+    setMdSource(false);
+  }, [activeFile?.path]);
 
   // Tokenizing a whole file is expensive, and `Editor` calls `highlight` on
   // EVERY render, including every frame of a panel drag. Memoize the rendered
@@ -842,8 +878,37 @@ export function CodeViewer() {
     );
   }
 
+  // Markdown files open in a RENDERED reading view by default: task
+  // briefs, READMEs and docs are what participants actually read here,
+  // and raw markdown source was hard enough to read that people fell
+  // back to the terminal. The toggle drops to the plain editor for the
+  // rare case of actually editing one.
+  if (isMd && !mdSource) {
+    return (
+      <div className="relative h-full overflow-y-auto bg-white">
+        <button
+          type="button"
+          onClick={() => setMdSource(true)}
+          className="absolute right-3 top-2 z-10 rounded-md border border-[#DDD9D0] bg-white/90 px-2 py-0.5 text-[11px] text-[#6E6353] shadow-sm transition-colors hover:bg-[#F5F2EC]"
+        >
+          view source
+        </button>
+        <Markdown className="px-6 py-5">{activeFile.content}</Markdown>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full overflow-auto bg-[#FAFAF9]">
+    <div className="relative h-full overflow-auto bg-[#FAFAF9]">
+      {isMd && (
+        <button
+          type="button"
+          onClick={() => setMdSource(false)}
+          className="sticky left-[calc(100%-7rem)] top-2 z-10 rounded-md border border-[#DDD9D0] bg-white/90 px-2 py-0.5 text-[11px] text-[#6E6353] shadow-sm transition-colors hover:bg-[#F5F2EC]"
+        >
+          view rendered
+        </button>
+      )}
       <Editor
         value={activeFile.content}
         onValueChange={(value) => {

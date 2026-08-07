@@ -439,7 +439,13 @@ button:focus-visible,
 }
 
 .prose table {
-  width: 100%;
+  /* Wide tables must SCROLL inside the chat bubble instead of spilling
+     past its background (the GitHub pattern): hug content when narrow,
+     clamp to the bubble and scroll when wide. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   table-layout: auto;
   text-align: left;
   margin-top: 2em;

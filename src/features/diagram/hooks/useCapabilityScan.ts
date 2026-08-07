@@ -86,6 +86,16 @@ export function useCapabilityScan({
         if (controller.signal.aborted) return;
         if (errorMessage) {
           setState({ kind: "error", message: errorMessage });
+        } else if (candidates.length === 0) {
+          // A dead backend behind the dev proxy answers 500 with an HTML
+          // page: the stream "succeeds" with zero events, which used to
+          // render as a silently EMPTY capability list. Zero candidates is
+          // never a real outcome for a scanned codebase, so surface it as
+          // a failure with a hint instead.
+          setState({
+            kind: "error",
+            message: "the scan returned nothing (is the backend running?)",
+          });
         } else {
           setState({ kind: "ready", candidates });
         }

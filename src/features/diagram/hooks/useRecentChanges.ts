@@ -254,19 +254,35 @@ export function useRecentChanges({
           editedBlocks.push({ id: b.id, label: b.label, category: b.category });
         }
       }
+      // Arrow keys are built from block IDS, and ids are label-derived, so
+      // a regen that re-ids an endpoint makes the SAME visual arrow show
+      // up as removed (old ids) plus added (new ids). Cancel out pairs
+      // whose endpoint LABELS match: those are id-churn artifacts, and
+      // reporting them minted phantom "linked"/"unlinked" tracker rows for
+      // arrows that never visibly changed.
+      const labelPair = (a: DeltaArrow) =>
+        `${a.fromLabel.toLowerCase()}|${a.toLabel.toLowerCase()}`;
+      const removedPairs = new Set(removedArrows.map(labelPair));
+      const addedPairs = new Set(addedArrows.map(labelPair));
+      const realAddedArrows = addedArrows.filter(
+        (a) => !removedPairs.has(labelPair(a)),
+      );
+      const realRemovedArrows = removedArrows.filter(
+        (a) => !addedPairs.has(labelPair(a)),
+      );
       if (
         addedBlocks.length ||
         removedBlocks.length ||
         editedBlocks.length ||
-        addedArrows.length ||
-        removedArrows.length
+        realAddedArrows.length ||
+        realRemovedArrows.length
       ) {
         onDelta({
           addedBlocks,
           removedBlocks,
           editedBlocks,
-          addedArrows,
-          removedArrows,
+          addedArrows: realAddedArrows,
+          removedArrows: realRemovedArrows,
         });
       }
     }

@@ -883,9 +883,14 @@ function DiagramCanvasInner({
             elementsSelectable={false}
           >
             <Background color="#E4E3E0" gap={16} />
+            {/* Bottom-right, lifted above the Focus toggle: the default
+             *  bottom-left corner is where the Add block pill and the
+             *  category legend live, and the legend covered these
+             *  buttons entirely. */}
             <Controls
               showInteractive={false}
-              className="!border-[#D4D4D4] !bg-white"
+              position="bottom-right"
+              className="!mb-14 !mr-1 !border-[#D4D4D4] !bg-white"
             />
           </ReactFlow>
         </div>

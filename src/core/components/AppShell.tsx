@@ -19,6 +19,7 @@ import {
 } from "@/core/project";
 import { DiagramCanvas, type DiagramView } from "@/features/diagram";
 import { getStudyMode } from "@/core/studyMode";
+import { hasSyncHandle } from "@/core/folderSync";
 
 /**
  * LAYOUT NOTE, learned the hard way: dragging a separator used to lag the
@@ -149,7 +150,32 @@ function FilesRail({
           expanded ? "justify-between px-3" : "justify-center"
         }`}
       >
-        {expanded && <span className="truncate">Files</span>}
+        {expanded && (
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">Files</span>
+            {/* Sync state must be LOUD: a project loaded without a disk
+             *  handle silently loses every edit for the study's test
+             *  runner, which is exactly what happened in the first
+             *  dry run. Green = edits mirror to disk; amber = browser
+             *  copy only. */}
+            {files.length > 0 &&
+              (hasSyncHandle() ? (
+                <span
+                  title="Edits are written back to the folder on disk"
+                  className="shrink-0 rounded-full bg-[#DFEAD0] px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-[#3A4A26]"
+                >
+                  synced
+                </span>
+              ) : (
+                <span
+                  title="Browser copy only: edits do NOT reach the folder on disk. Re-open via the open folder button and allow editing."
+                  className="shrink-0 rounded-full bg-[#F4E7C8] px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-[#6B4E14]"
+                >
+                  not synced
+                </span>
+              ))}
+          </span>
+        )}
         <button
           type="button"
           onClick={onToggle}

@@ -54,7 +54,7 @@ import {
  */
 export function ChatView({ model }: { model?: string }) {
   const session = useClaudeSession({ model });
-  const { files, setChatMessages, setChatRunning } = useProject();
+  const { files, setChatMessages, setChatRunning, projectKey } = useProject();
   const { entries: activityEntries, clear: clearActivity } = useChatActivity();
   const running = session.status === "running";
 
@@ -89,6 +89,23 @@ export function ChatView({ model }: { model?: string }) {
     // Drop any queued visual-edit so it can't fire into the fresh session.
     resetVisualEditQueue();
   };
+
+  // A NEW project upload starts a fresh conversation. Keeping the old
+  // transcript next to a new project misled a dry run badly: a stale
+  // "Created highlight.py" message read as if it applied to the freshly
+  // re-cloned folder, whose disk copy of that work was gone.
+  const projectKeySeenRef = useRef(projectKey);
+  useEffect(() => {
+    if (projectKeySeenRef.current === projectKey) return;
+    projectKeySeenRef.current = projectKey;
+    logEvent("chat-new", { messages: session.messages.length, via: "project-upload" }, "system");
+    session.reset();
+    clearActivity();
+    resetVisualEditQueue();
+    // Reading refs/state from the render that saw the upload is fine here:
+    // the reset APIs are all stable callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectKey]);
 
   const handleSend = (prompt: string) => {
     const isFirstTurn = session.messages.length === 0;
