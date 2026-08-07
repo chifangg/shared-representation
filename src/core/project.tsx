@@ -120,6 +120,14 @@ type ProjectContextValue = {
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
 
+/** Expanded-folder paths for the file tree, kept at MODULE level so
+ *  collapsing the Files rail (which unmounts the whole tree) does not
+ *  reset what the user opened or closed. Reseeded per upload by
+ *  `loadFiles`: root folders start expanded, everything deeper starts
+ *  collapsed, so a 400-file repo opens as a short top-level listing
+ *  instead of a fully unrolled tree. */
+let expandedFolders = new Set<string>();
+
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [openPaths, setOpenPaths] = useState<string[]>([]);
@@ -156,6 +164,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       fileCount: entries.length,
       totalBytes: entries.reduce((n, f) => n + f.size, 0),
     });
+    // Fresh tree state per project: only the root folder(s) open.
+    expandedFolders = new Set(entries.map((f) => f.path.split("/")[0]));
     setFiles(entries);
     setOpenPaths([]);
     setActivePath(null);
@@ -684,7 +694,10 @@ function TreeNodeView({
   onSelect: (path: string) => void;
   depth: number;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  // Expansion lives in the module-level set (survives the rail closing);
+  // the counter only forces this node to re-render after a toggle.
+  const [, bump] = useState(0);
+  const expanded = expandedFolders.has(node.path);
 
   if (node.type === "folder") {
     return (
@@ -695,7 +708,9 @@ function TreeNodeView({
               path: node.path,
               expanded: !expanded,
             });
-            setExpanded(!expanded);
+            if (expanded) expandedFolders.delete(node.path);
+            else expandedFolders.add(node.path);
+            bump((n) => n + 1);
           }}
           className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-black/[0.05]"
           style={{ paddingLeft: depth * 12 + 4 }}

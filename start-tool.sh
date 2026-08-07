@@ -30,6 +30,12 @@ if [ "${1:-}" = "--check" ]; then
     echo "claude cli: MISSING (install Claude Code and log in, see INSTALL.md)"
     ok=0
   fi
+  if command -v python3 >/dev/null 2>&1; then
+    echo "python3: ok"
+  else
+    echo "python3: MISSING (needed on session day; install per INSTALL.md)"
+    ok=0
+  fi
   if [ "$ok" = 1 ]; then
     echo "SETUP-OK $(git rev-parse --short HEAD)"
   else
