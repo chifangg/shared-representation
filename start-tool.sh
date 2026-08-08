@@ -54,12 +54,15 @@ if [ "${1:-}" = "--check" ]; then
 fi
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  # Prompted silently so the key never lands in the shell history.
-  read -r -s -p "Paste the study API key (input stays hidden), then press enter: " ANTHROPIC_API_KEY
+  # Prompted silently so the key never lands in the shell history. Not
+  # every session gets a key, so an empty enter is a normal answer.
+  echo "If the moderator sent you an API key, paste it now (typing stays hidden)."
+  echo "If you did not get a key, just press enter."
+  read -r -s -p "API key: " ANTHROPIC_API_KEY
   echo
   export ANTHROPIC_API_KEY
 fi
 
 echo "Starting the tool. Keep this window open."
-echo "Open the link the moderator gives you in Chrome, e.g. http://localhost:8080/?mode=tool"
+echo "Now open, in Chrome, the exact link the moderator sends you."
 cd backend && exec cargo run --bin claude-ui-app

@@ -64,6 +64,28 @@ export function AppShell() {
   const railW = filesExpanded ? RAIL_W_OPEN : RAIL_W;
   const codeW = codeOpen ? CODE_W : 0;
 
+  // No study condition anywhere (no ?mode= in the URL, nothing stored
+  // from a previous visit): refuse to start rather than fall into a
+  // silent default. A participant who types the bare URL instead of
+  // opening the moderator's link would otherwise land in an arbitrary
+  // condition. All hooks above already ran, so this early return is
+  // safe under the rules of hooks.
+  if (getStudyMode() === null) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#EFEDE8] px-6 text-[#484848]">
+        <div className="max-w-md rounded-xl border border-[#D9D7D2] bg-white p-8 shadow-sm">
+          <h1 className="mb-3 text-lg font-semibold">Open the study link</h1>
+          <p className="text-sm leading-relaxed">
+            This window was opened without a study link, so the session
+            cannot start. In Chrome, open the exact link the moderator
+            sent you; it carries the settings for your session. If you
+            do not have a link yet, ask the moderator.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`relative flex h-screen flex-col text-[#484848] ${

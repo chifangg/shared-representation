@@ -9,6 +9,12 @@
  * group. There is deliberately NO visible toggle: participants must not
  * discover or flip their condition.
  *
+ * A page opened with NO mode anywhere (no query param, nothing stored)
+ * gets null, and the shell refuses to start the session: a participant
+ * who types the bare URL instead of opening the moderator's link must
+ * not fall into a silent default condition. The moderator's link is
+ * the only way in the first time.
+ *
  * The mode is fixed for the lifetime of a page load (read once at module
  * init). Flipping conditions requires a reload with the query param,
  * which is fine: the condition never changes mid-session by design, and
@@ -20,7 +26,7 @@ export type StudyMode = "tool" | "baseline";
 
 const STORAGE_KEY = "study-mode";
 
-function readMode(): StudyMode {
+function readMode(): StudyMode | null {
   try {
     const fromUrl = new URLSearchParams(window.location.search).get("mode");
     if (fromUrl === "baseline" || fromUrl === "tool") {
@@ -30,13 +36,13 @@ function readMode(): StudyMode {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === "baseline" || stored === "tool") return stored;
   } catch {
-    // Storage unavailable (private mode etc.): fall through to default.
+    // Storage unavailable (private mode etc.): fall through to unset.
   }
-  return "tool";
+  return null;
 }
 
-const MODE: StudyMode = readMode();
+const MODE: StudyMode | null = readMode();
 
-export function getStudyMode(): StudyMode {
+export function getStudyMode(): StudyMode | null {
   return MODE;
 }
