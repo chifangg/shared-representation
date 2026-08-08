@@ -11,6 +11,8 @@ import { ReadProjectFileResultCard } from "@/core/tools/builtins/ReadProjectFile
 import { WriteProjectFile } from "@/core/tools/builtins/WriteProjectFile";
 import { WriteProjectFileResultCard } from "@/core/tools/builtins/WriteProjectFileResultCard";
 import { EditProjectFile } from "@/core/tools/builtins/EditProjectFile";
+import { RunProjectTests } from "@/core/tools/builtins/RunProjectTests";
+import { SearchProjectFiles } from "@/core/tools/builtins/SearchProjectFiles";
 import {
   ChangeBlockColor,
   DeleteBlock,
@@ -29,6 +31,14 @@ registerClientTool("write_project_file", WriteProjectFile);
 registerToolResult("write_project_file", WriteProjectFileResultCard);
 registerClientTool("edit_project_file", EditProjectFile);
 registerToolResult("edit_project_file", WriteProjectFileResultCard);
+
+// Verify-and-locate tools: `run_project_tests` posts the in-memory
+// project to the backend's isolated pytest sandbox (agents with no
+// shell used to burn minutes mentally simulating the suite instead);
+// `search_project_files` is an in-browser regex grep so finding a hook
+// point does not require ingesting whole files.
+registerClientTool("run_project_tests", RunProjectTests);
+registerClientTool("search_project_files", SearchProjectFiles);
 
 // Chat-driven diagram edits (bidirectional): recolor / delete a block on
 // the architecture diagram. These mutate the diagram view, not code.

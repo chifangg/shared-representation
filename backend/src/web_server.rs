@@ -197,6 +197,12 @@ pub async fn create_web_server(
             "/api/log",
             axum::routing::post(crate::logging::ingest_interaction_log),
         )
+        // Isolated pytest sandbox for the run_project_tests client tool
+        // (see run_tests.rs for why the agent needs it).
+        .route(
+            "/api/run-tests",
+            axum::routing::post(crate::run_tests::run_tests),
+        )
         // Researcher-facing log viewer + its admin endpoints (filter,
         // delete, label). Gated by APP_LOG_ADMIN_TOKEN when set.
         .route("/logs", get(crate::logging::logs_page))

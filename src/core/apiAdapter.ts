@@ -22,6 +22,14 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+/** Model the chat spawns when the caller does not pick one. Alias, not
+ *  a pinned ID, so the CLI resolves it to the newest model of that tier
+ *  the account offers. Sonnet because study participants run on gifted
+ *  Pro subscriptions, which do not include Opus; a build can override
+ *  via VITE_CHAT_MODEL (e.g. for local dev on a Max account). */
+export const DEFAULT_CHAT_MODEL: string =
+  (import.meta.env.VITE_CHAT_MODEL as string | undefined) ?? "sonnet";
+
 const STREAMING_COMMANDS = new Set([
   "execute_claude_code",
   "continue_claude_code",
@@ -128,7 +136,7 @@ async function handleStreamingCommand<T>(
         command_type: command.replace("_claude_code", ""),
         project_path: params?.projectPath ?? "",
         prompt: params?.prompt ?? "",
-        model: params?.model ?? "sonnet",
+        model: params?.model ?? DEFAULT_CHAT_MODEL,
         session_id: params?.sessionId,
         client_session_id: clientSessionId,
         extra: params?.extra ?? {},

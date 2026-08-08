@@ -22,8 +22,11 @@ For the high-level picture see
   specific code here.**
 - `src/features/diagram/` — the diagramming feature. All
   React-Flow / dagre / diagram-protocol code lives here.
-- `src/main.tsx` — registers the three client tools the app actually
-  uses (`read_project_file`, `write_project_file`, `edit_project_file`).
+- `src/main.tsx` — registers the client tools the app actually uses:
+  `read_project_file`, `write_project_file`, `edit_project_file`,
+  `search_project_files` (in-browser regex grep), `run_project_tests`
+  (posts the in-memory project to the backend's pytest sandbox at
+  `/api/run-tests`), plus the diagram ops.
 - `backend/src/` — Rust server. `main.rs` declares server / client
   tools; `web_server.rs` has the HTTP + WebSocket handlers; the
   `tool-bridge` binary in `bin/tool_bridge.rs` is the MCP shim.

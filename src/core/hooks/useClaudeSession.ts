@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   apiCall,
   closeSession,
+  DEFAULT_CHAT_MODEL,
   resolveClientToolCall,
 } from "@/core/apiAdapter";
 
@@ -53,7 +54,7 @@ export interface UseClaudeSessionOptions {
   projectPath?: string;
   /** Override the client-generated UUID. Rarely needed. */
   clientSessionId?: string;
-  /** Model alias or full ID. Defaults to `sonnet`. */
+  /** Model alias or full ID. Defaults to DEFAULT_CHAT_MODEL. */
   model?: string;
   /** Arbitrary extra flags forwarded to the backend's `ClaudeExtraArgs`. */
   extra?: Record<string, unknown>;
@@ -172,7 +173,7 @@ export function useClaudeSession(opts: UseClaudeSessionOptions) {
         await apiCall(command, {
           projectPath: opts.projectPath ?? "",
           prompt,
-          model: opts.model ?? "sonnet",
+          model: opts.model ?? DEFAULT_CHAT_MODEL,
           clientSessionId: sessionId,
           // For resume, the backend reads the conversation UUID from
           // `sessionId` (the prior conversation we want to continue).

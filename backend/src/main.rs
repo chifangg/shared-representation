@@ -7,6 +7,7 @@ mod core;
 mod diagram;
 mod examples;
 mod logging;
+mod run_tests;
 mod suggestions;
 mod tool_dispatch;
 mod web_server;
@@ -192,6 +193,64 @@ fn build_tool_registry() -> core::tools::ToolRegistry {
                 }
             },
             "required": ["path", "content"],
+            "additionalProperties": false
+        }),
+    );
+
+    b.client_tool(
+        "run_project_tests",
+        "Run the project's Python test suite (pytest) against the CURRENT \
+         state of the uploaded project, in an isolated sandbox. This is \
+         how you VERIFY your work: write the code, run this tool, read \
+         the failures, fix them, and run again until everything passes. \
+         Trust its output over your own mental simulation of the tests; \
+         running is far faster and more reliable than proving \
+         correctness by reasoning. The sandbox is separate from the \
+         user's working copy and affects nothing outside itself. The \
+         first call may take up to a minute (environment setup); later \
+         calls are fast.",
+        json!({
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": "Optional pytest target: a test file \
+                        path relative to the project root (e.g. \
+                        'tests/study/test_task1_callout.py'), optionally \
+                        with '::TestClass::test_name'. Omit to run the \
+                        project's study suite (tests/study when present, \
+                        else tests)."
+                }
+            },
+            "additionalProperties": false
+        }),
+    );
+
+    b.client_tool(
+        "search_project_files",
+        "Search every file in the uploaded project with a regular \
+         expression (JavaScript regex syntax). Returns matching lines as \
+         'path:line: text'. Use this to LOCATE things fast: where a \
+         function is defined, which files mention a hook or config key, \
+         where a pattern is registered. Then read the file you actually \
+         need with read_project_file; do not edit based on a matched \
+         line alone.",
+        json!({
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "The regular expression to search for, \
+                        matched line by line (JavaScript syntax; no \
+                        flags in the pattern)."
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Match case-sensitively. Defaults to \
+                        false."
+                }
+            },
+            "required": ["pattern"],
             "additionalProperties": false
         }),
     );
