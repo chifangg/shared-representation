@@ -85,9 +85,18 @@ impl<T> ApiResponse<T> {
     }
 }
 
-/// Serve the React frontend
-async fn serve_frontend() -> Html<&'static str> {
-    Html(include_str!("../../dist/index.html"))
+/// Serve the React frontend.
+///
+/// Read from disk at request time, matching how `/assets` is served:
+/// the compile-time `include_str!` copy references asset hashes from
+/// whenever the backend was last built, so after a `bun run build` it
+/// points at deleted files and the page loads blank. The embedded copy
+/// stays only as a fallback for when the dist file is unreadable.
+async fn serve_frontend() -> Html<String> {
+    match tokio::fs::read_to_string("../dist/index.html").await {
+        Ok(page) => Html(page),
+        Err(_) => Html(include_str!("../../dist/index.html").to_string()),
+    }
 }
 
 /// Create the web server.

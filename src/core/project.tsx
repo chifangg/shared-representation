@@ -28,6 +28,7 @@ import {
   clearSyncHandle,
   isFolderSyncSupported,
   pickAndReadFolder,
+  readFolderDelta,
   syncWrite,
 } from "@/core/folderSync";
 import { shouldIgnorePath } from "@/core/projectIgnore";
@@ -246,6 +247,90 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setChatThemeState(null);
     setProjectKey((k) => k + 1);
   }, []);
+
+  // Pull disk changes into the project whenever the window regains
+  // focus. The study's task runner rewrites files on disk at every
+  // stage transition (next brief and suite decrypted in place, old ones
+  // removed), and the participant comes back from the terminal right
+  // after; without this they would have to re-upload the whole project
+  // between tasks. Deltas only: projectKey does not move, so the
+  // diagram, the chat and the onboarding answers all survive.
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const uploadingRef = useRef(uploading);
+  uploadingRef.current = uploading;
+  const refreshInFlightRef = useRef(false);
+
+  const refreshFromDisk = useCallback(async () => {
+    if (uploadingRef.current || refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    try {
+      const snapshot = filesRef.current;
+      const delta = await readFolderDelta(snapshot);
+      if (!delta) return;
+      const { added, changed, removedPaths } = delta;
+      if (!added.length && !changed.length && !removedPaths.length) return;
+      const snapContent = new Map(snapshot.map((f) => [f.path, f.content]));
+      setFiles((prev) => {
+        const removed = new Set(removedPaths);
+        const changedMap = new Map(changed.map((f) => [f.path, f]));
+        const next: FileEntry[] = [];
+        for (const f of prev) {
+          // Apply a disk-side removal or change only if the browser copy
+          // is still what we diffed against; an agent write that landed
+          // meanwhile wins over the stale disk read.
+          const untouched = f.content === snapContent.get(f.path);
+          if (removed.has(f.path) && untouched) continue;
+          const c = changedMap.get(f.path);
+          next.push(c && untouched ? c : f);
+        }
+        const have = new Set(next.map((f) => f.path));
+        for (const a of added) if (!have.has(a.path)) next.push(a);
+        return next;
+      });
+      if (removedPaths.length) {
+        const removed = new Set(removedPaths);
+        setOpenPaths((prev) => {
+          const next = prev.filter((p) => !removed.has(p));
+          setActivePath((cur) =>
+            cur && removed.has(cur) ? (next[next.length - 1] ?? null) : cur,
+          );
+          return next;
+        });
+      }
+      logEvent(
+        "folder-refresh",
+        {
+          added: added.length,
+          changed: changed.length,
+          removed: removedPaths.length,
+          addedPaths: added.slice(0, 8).map((f) => f.path),
+        },
+        "system",
+      );
+    } finally {
+      refreshInFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    let last = 0;
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - last < 2000) return;
+      last = now;
+      void refreshFromDisk();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) onFocus();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refreshFromDisk]);
 
   // Memoized: an inline object literal here is a NEW value on every provider
   // render, which invalidates every consumer of this context (the canvas, the

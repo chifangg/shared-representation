@@ -21,6 +21,13 @@
  * reload drops sync until the user re-opens the folder. Zip uploads
  * and non-Chromium browsers simply never get a handle; everything then
  * behaves exactly as before this module existed.
+ *
+ * The reverse direction exists too, as a pull rather than a watch:
+ * `readFolderDelta` re-enumerates the connected folder and reports how
+ * disk differs from the in-browser project. The study's task runner
+ * rewrites files on disk at every stage transition (next brief and
+ * test suite decrypted in place, old ones removed), and without a pull
+ * the participant would have to re-upload the whole project each time.
  */
 
 import type { FileEntry } from "@/core/project";
@@ -144,6 +151,71 @@ export async function pickAndReadFolder(
   writeChain = Promise.resolve();
   logEvent("folder-sync-connected", { fileCount: out.length });
   return out;
+}
+
+/** How the connected folder differs from the in-browser project.
+ *  `changed` carries the new disk content for paths whose browser copy
+ *  differs; the caller re-checks content at apply time so a concurrent
+ *  agent write is never clobbered by a stale read. */
+export type DiskDelta = {
+  added: FileEntry[];
+  changed: FileEntry[];
+  removedPaths: string[];
+};
+
+/**
+ * Re-read the connected folder and diff it against the in-browser
+ * project. Returns null when no folder is connected or the read fails.
+ * Paths with a pending (debounced, not yet flushed) write are skipped
+ * in both directions: for those, the browser is ahead of disk, so the
+ * disk copy is stale by construction.
+ */
+export async function readFolderDelta(
+  current: FileEntry[],
+): Promise<DiskDelta | null> {
+  const root = rootHandle;
+  if (!root) return null;
+  const handles: { path: string; handle: FSFileHandle }[] = [];
+  try {
+    await collectFiles(root, root.name, handles);
+  } catch (e) {
+    logEvent(
+      "folder-refresh-failed",
+      { error: String(e).slice(0, 120) },
+      "system",
+    );
+    return null;
+  }
+  const browser = new Map(current.map((f) => [f.path, f]));
+  const diskPaths = new Set<string>();
+  const added: FileEntry[] = [];
+  const changed: FileEntry[] = [];
+  for (const { path, handle } of handles) {
+    diskPaths.add(path);
+    if (pendingTimers.has(path)) continue;
+    let text: string;
+    try {
+      text = await (await handle.getFile()).text();
+    } catch {
+      // Unreadable right now (binary, locked): leave the browser copy.
+      continue;
+    }
+    const existing = browser.get(path);
+    if (!existing) {
+      added.push({
+        path,
+        name: path.split("/").pop() ?? path,
+        content: text,
+        size: text.length,
+      });
+    } else if (existing.content !== text) {
+      changed.push({ ...existing, content: text, size: text.length });
+    }
+  }
+  const removedPaths = current
+    .filter((f) => !diskPaths.has(f.path) && !pendingTimers.has(f.path))
+    .map((f) => f.path);
+  return { added, changed, removedPaths };
 }
 
 async function writeToDisk(path: string, content: string): Promise<void> {
