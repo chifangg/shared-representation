@@ -38,8 +38,16 @@ if [ "${1:-}" = "--check" ]; then
   fi
   if [ "$ok" = 1 ]; then
     echo "SETUP-OK $(git rev-parse --short HEAD)"
+    echo
+    echo "All good. Copy EVERY line above, from 'commit:' through"
+    echo "'SETUP-OK', and paste them into the confirmation form."
   else
     echo "SETUP-INCOMPLETE"
+    echo
+    echo "Something is missing. Each MISSING line names the command that"
+    echo "fixes it; run that, then run ./start-tool.sh --check again."
+    echo "Stuck? Paste every line above into the confirmation form and"
+    echo "we will help."
     exit 1
   fi
   exit 0

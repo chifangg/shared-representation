@@ -47,9 +47,21 @@ The Rust build takes several minutes the first time. That is normal.
 ./start-tool.sh --check
 ```
 
-Every line should say ok. Copy the final `SETUP-OK ...` line into the
-confirmation form we sent you. If anything says MISSING, run the
-command it names and check again.
+It prints a short report. A good one looks like this (your commit id
+will differ):
+
+```
+commit: 6efe94e
+frontend build: ok
+backend build: ok
+claude cli: ok
+python3: ok
+SETUP-OK 6efe94e
+```
+
+Copy that whole report, every line from `commit:` through `SETUP-OK`,
+and paste it into the confirmation form we sent you. If any line says
+MISSING, run the command that line names, then check again.
 
 ## On session day
 
