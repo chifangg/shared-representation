@@ -12,6 +12,7 @@
 
 import type { CapabilityCandidate } from "../types";
 import { dlog } from "../util/debug";
+import { STREAM_IDLE_MS as IDLE_MS, withIdleTimeout } from "./idleTimeout";
 
 export type CapabilityScanEvent =
   | { kind: "capability"; data: CapabilityCandidate }
@@ -47,15 +48,22 @@ export async function fetchCapabilityScanStream({
   signal: AbortSignal;
   onEvent: (evt: CapabilityScanEvent) => void;
 }): Promise<void> {
-  const resp = await fetch("/api/diagram", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      project_context: projectContext,
-      view: "capability_scan",
+  // Same inactivity guard as the structure stream: a hung backend
+  // otherwise leaves the scan at "loading" forever and the onboarding
+  // survey never opens.
+  const resp = await withIdleTimeout(
+    fetch("/api/diagram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_context: projectContext,
+        view: "capability_scan",
+      }),
+      signal,
     }),
-    signal,
-  });
+    IDLE_MS,
+    "capability scan request",
+  );
   if (!resp.body) throw new Error("no response body");
 
   const reader = resp.body.getReader();
@@ -63,7 +71,11 @@ export async function fetchCapabilityScanStream({
   let buf = "";
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await withIdleTimeout(
+      reader.read(),
+      IDLE_MS,
+      "capability scan stream",
+    );
     if (done) break;
     buf += decoder.decode(value, { stream: true });
 

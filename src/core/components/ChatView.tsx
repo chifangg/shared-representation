@@ -125,6 +125,7 @@ export function ChatView({ model }: { model?: string }) {
   const resetVisualEditQueue = useVisualEditSend({
     send: handleSend,
     running,
+    diagramBusy,
   });
 
   // Context attachments dragged in from the diagram (blocks, capability

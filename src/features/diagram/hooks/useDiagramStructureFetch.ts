@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type MutableRefObject,
@@ -39,6 +40,7 @@ export function useDiagramStructureFetch({
   projectKey,
   files,
   userGoal,
+  chatRunning,
   selectedId,
   setNodes,
   setEdges,
@@ -46,6 +48,11 @@ export function useDiagramStructureFetch({
 }: {
   projectKey: number;
   files: FileEntry[];
+  /** True while a chat turn streams. A generation must never overlap a
+   *  live turn (the historical canvas wedge), so the fetch effect defers
+   *  while this is true and re-fires on its falling edge. The reverse
+   *  direction is the chat's diagramBusy gate. */
+  chatRunning: boolean;
   /** Composed survey answer fed to the backend as `<user_goal>`. Null
    *  before the user finishes the onboarding survey — the effect bails
    *  in that case, leaving state at idle so the canvas keeps the modal
@@ -68,6 +75,11 @@ export function useDiagramStructureFetch({
 } {
   const [state, setState] = useState<FetchState>({ kind: "idle" });
   const [retryNonce, setRetryNonce] = useState(0);
+  // Whether any run has reached "ready" for this project. A preserve
+  // regen only makes sense when there is a diagram on screen to keep;
+  // a preserve request left over from before the survey completed
+  // would otherwise make the FIRST generation buffer silently.
+  const hasEverReadyRef = useRef(false);
 
   // Stable string of the current file paths. We key the fetch effect
   // on this (not on `files` itself) so that Claude calling
@@ -88,6 +100,7 @@ export function useDiagramStructureFetch({
     setState({ kind: "idle" });
     setNodes([]);
     setEdges([]);
+    hasEverReadyRef.current = false;
   }, [projectKey, setNodes, setEdges]);
 
   // Initial streaming fetch — kicks in whenever state goes idle and
@@ -98,11 +111,18 @@ export function useDiagramStructureFetch({
     if (state.kind !== "idle") return;
     // Wait for the onboarding survey to deliver a goal before firing.
     if (userGoal === null) return;
+    // Never start while a chat turn streams: the two streams racing is
+    // the historical canvas wedge. chatRunning is a dep, so the effect
+    // re-fires on the turn's end and starts then.
+    if (chatRunning) return;
 
     // EDIT-driven regen: keep the existing diagram on screen, buffer the
     // stream silently, and swap to the new layout only on `ready`. A
-    // normal generate blanks + streams blocks in as they arrive.
-    const preserve = preserveRegenRef?.current?.active ?? false;
+    // normal generate blanks + streams blocks in as they arrive. Only
+    // honored when a diagram actually reached the screen; a stale
+    // request from before the first generation falls back to streaming.
+    const preserve =
+      (preserveRegenRef?.current?.active ?? false) && hasEverReadyRef.current;
 
     setState({ kind: "loading", startedAt: Date.now() });
     if (!preserve) {
@@ -121,6 +141,7 @@ export function useDiagramStructureFetch({
       setEdges(laid.edges);
     };
 
+    let settled = false;
     (async () => {
       let errorMessage: string | null = null;
       try {
@@ -151,12 +172,14 @@ export function useDiagramStructureFetch({
         });
 
         if (controller.signal.aborted) return;
+        settled = true;
         if (errorMessage) {
           setState({ kind: "error", message: errorMessage });
         } else {
           // Lay out the final schema once and swap. For the preserve path
           // this is the single moment the old diagram is replaced.
           reLayout();
+          hasEverReadyRef.current = true;
           setState({
             kind: "ready",
             schema: { blocks, arrows },
@@ -164,13 +187,33 @@ export function useDiagramStructureFetch({
         }
       } catch (e) {
         if (controller.signal.aborted) return;
+        settled = true;
         setState({ kind: "error", message: String(e) });
       } finally {
-        if (preserveRegenRef) preserveRegenRef.current.active = false;
+        // An aborted run keeps the preserve request: the restart that
+        // follows (new filesKey, or a chat turn ending) should still
+        // swap in place rather than blank the canvas.
+        if (!controller.signal.aborted && preserveRegenRef) {
+          preserveRegenRef.current.active = false;
+        }
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      // A dep change mid-stream (files flowing in from disk, a chat
+      // turn starting) aborts the run above, and the aborted body
+      // returns without a terminal setState. Left alone, state would
+      // strand at "loading": diagramBusy stays true and the chat is
+      // gated forever. Restore idle, and bump the nonce so the effect
+      // re-fires with the fresh state and restarts the generation
+      // (state.kind is deliberately not a dep, so the idle write alone
+      // would not re-run it). On unmount both writes are harmless no-ops.
+      if (!settled) {
+        setState((s) => (s.kind === "loading" ? { kind: "idle" } : s));
+        setRetryNonce((n) => n + 1);
+      }
+    };
     // `state.kind` and `selectedId` are intentionally omitted:
     //  - state.kind: read inside the guard `state.kind !== "idle"`;
     //    including it as a dep causes the cleanup-then-rerun cycle to
@@ -183,8 +226,13 @@ export function useDiagramStructureFetch({
     //    null → string and the effect re-fires (guard above no longer
     //    bails). A subsequent regenerate flips it back to null, resets
     //    state to idle, and the next non-null goal triggers a fresh run.
+    //  - chatRunning IS in deps: its falling edge is what starts a
+    //    generation that was deferred by the guard above. Its rising
+    //    edge mid-stream aborts the run (mutual exclusion, both
+    //    directions); the cleanup restores idle so the generation
+    //    restarts cleanly when the turn ends.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filesKey, userGoal, retryNonce, setNodes, setEdges]);
+  }, [filesKey, userGoal, chatRunning, retryNonce, setNodes, setEdges]);
 
   return { state, setState, retryNonce, setRetryNonce };
 }

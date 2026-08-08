@@ -19,11 +19,18 @@ import { useDiagramBusSubscribe } from "../protocol/bus";
 export function useVisualEditSend({
   send,
   running,
+  diagramBusy,
 }: {
   /** The chat's send path; called with the pre-formatted prompt. */
   send: (prompt: string) => void;
   /** True while Claude is mid-turn; prompts arriving then are queued. */
   running: boolean;
+  /** True while a diagram generation streams. A prompt sent then races
+   *  the generation state machine (the historical canvas wedge), so
+   *  arrivals queue exactly like mid-turn ones and flush when the
+   *  generation settles. This mirrors the PromptInput disable, which
+   *  this bus path would otherwise bypass. */
+  diagramBusy: boolean;
 }): () => void {
   // Latest `send`, so the deferred-flush effect below can call it without
   // a stale closure (and without asking the caller to memoize).
@@ -35,27 +42,32 @@ export function useVisualEditSend({
 
   useDiagramBusSubscribe("visual-edit", (detail) => {
     if (!detail?.prompt) return;
-    if (running) {
+    if (running || diagramBusy) {
       // Claude is still finishing a turn (e.g. the round-1 suggestions turn
       // is closing at the exact moment the user picks a card: the cards go
       // pickable as soon as the options JSON streams in, before the turn
-      // ends). Don't silently drop the pick, or the agent appears to do
-      // nothing. Queue it and flush when the turn ends. Last-write-wins is
-      // fine here (one pending visual edit at a time).
+      // ends), or a diagram generation is streaming. Don't silently drop
+      // the pick, or the agent appears to do nothing. Queue it and flush
+      // when both are clear. Last-write-wins is fine here (one pending
+      // visual edit at a time).
       pendingRef.current = detail.prompt;
       return;
     }
     send(detail.prompt);
   });
 
-  // Flush a queued visual-edit the moment Claude is free again.
+  // Flush a queued visual-edit the moment Claude AND the diagram are
+  // free. Watching diagramBusy too closes the settle-edge race: the
+  // turn ends and the settle effect starts an edit-driven regen in the
+  // very next commits; a flush gated on `running` alone would fire a
+  // new turn straight into that regen's stream.
   useEffect(() => {
-    if (running) return;
+    if (running || diagramBusy) return;
     const queued = pendingRef.current;
     if (!queued) return;
     pendingRef.current = null;
     sendRef.current(queued);
-  }, [running]);
+  }, [running, diagramBusy]);
 
   return useCallback(() => {
     pendingRef.current = null;

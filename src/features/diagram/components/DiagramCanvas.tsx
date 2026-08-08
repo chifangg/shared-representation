@@ -219,6 +219,7 @@ function DiagramCanvasInner({
     projectKey,
     files,
     userGoal,
+    chatRunning,
     selectedId,
     setNodes,
     setEdges,
@@ -910,6 +911,10 @@ function DiagramCanvasInner({
           nodeCount={nodes.length}
           onRetry={() => {
             logEvent("diagram-retry", {});
+            // The fetch effect only starts from "idle"; a bare nonce
+            // bump while state sits at "error" re-runs the effect into
+            // its early-return, so Retry did nothing.
+            setState({ kind: "idle" });
             setRetryNonce((n) => n + 1);
           }}
         />

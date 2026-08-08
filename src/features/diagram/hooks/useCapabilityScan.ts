@@ -27,6 +27,10 @@ export function useCapabilityScan({
   files: FileEntry[];
 }): CapabilityScanState {
   const [state, setState] = useState<CapabilityScanState>({ kind: "idle" });
+  // Bumped by the cleanup when it un-strands an aborted run, so the
+  // effect re-fires and restarts the scan (state.kind is deliberately
+  // not a dep; the idle write alone would leave the scan dormant).
+  const [restartNonce, setRestartNonce] = useState(0);
 
   const filesKey = useMemo(
     () =>
@@ -69,6 +73,7 @@ export function useCapabilityScan({
     const projectContext = buildScanContext(files);
     const candidates: CapabilityCandidate[] = [];
 
+    let settled = false;
     (async () => {
       let errorMessage: string | null = null;
       try {
@@ -84,6 +89,7 @@ export function useCapabilityScan({
           },
         });
         if (controller.signal.aborted) return;
+        settled = true;
         if (errorMessage) {
           setState({ kind: "error", message: errorMessage });
         } else if (candidates.length === 0) {
@@ -101,13 +107,24 @@ export function useCapabilityScan({
         }
       } catch (e) {
         if (controller.signal.aborted) return;
+        settled = true;
         setState({ kind: "error", message: String(e) });
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      // A filesKey change mid-scan (e.g. files flowing in from the
+      // synced folder) aborts the run, which returns without a terminal
+      // setState. Restore idle so the effect's re-run starts a fresh
+      // scan; stranded at "loading" the survey overlay never opens.
+      if (!settled) {
+        setState((s) => (s.kind === "loading" ? { kind: "idle" } : s));
+        setRestartNonce((n) => n + 1);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filesKey]);
+  }, [filesKey, restartNonce]);
 
   return state;
 }
