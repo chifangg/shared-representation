@@ -131,13 +131,13 @@ export function AppShell() {
               orientation="horizontal"
               className="h-full"
             >
-              <Panel id="chat" defaultSize={38} minSize={14}>
-                <ChatView />
+              <Panel id="diagram" defaultSize={62} minSize={30}>
+                <DiagramPanel />
               </Panel>
               <ResizeHandle />
 
-              <Panel id="diagram" defaultSize={62} minSize={30}>
-                <DiagramPanel />
+              <Panel id="chat" defaultSize={38} minSize={14}>
+                <ChatView />
               </Panel>
             </Group>
           )}

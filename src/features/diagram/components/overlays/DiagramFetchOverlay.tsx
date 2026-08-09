@@ -1,4 +1,4 @@
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2, Upload } from "lucide-react";
 import type { FetchState } from "../../types";
 import { DiagramLoadingCard } from "../nodes/DiagramLoadingCard";
 import { ElapsedClock } from "../nodes/ElapsedClock";
@@ -6,7 +6,8 @@ import { ElapsedClock } from "../nodes/ElapsedClock";
 /**
  * Loading / streaming / error overlay states for the diagram canvas.
  *
- * Three layouts:
+ * Layouts:
+ *  - no project yet → centered "upload a project" prompt
  *  - state.loading + no nodes yet → full-canvas blur + DiagramLoadingCard
  *  - state.loading + nodes streaming → bottom-right chip with count
  *  - state.error → centered red alert with Retry button
@@ -23,7 +24,18 @@ export function DiagramFetchOverlay({
   nodeCount: number;
   onRetry: () => void;
 }) {
-  if (!hasFiles) return null;
+  // Before any project exists the canvas is a blank grid, so the
+  // "upload something" nudge lives here rather than in the chat panel:
+  // the empty diagram is the biggest thing on screen, and the Files
+  // rail it points at sits directly beside it.
+  if (!hasFiles) {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 px-4 text-center text-sm text-[#9A9081]">
+        <Upload size={28} className="opacity-40" />
+        <p>Upload a project in the Files panel to begin.</p>
+      </div>
+    );
+  }
 
   if (state.kind === "loading") {
     // Once any blocks have arrived, drop the full-canvas blur so the

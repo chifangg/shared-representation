@@ -13,6 +13,7 @@ import {
 } from "@/core/chatContext";
 import { useChatContextDropZone } from "@/core/chatContextDrag";
 import { useChatActivity } from "@/core/chatActivity";
+import { getStudyMode } from "@/core/studyMode";
 import { logEvent, setLogContext } from "@/core/interactionLog";
 import { ThinkingBubble } from "@/core/components/ThinkingBubble";
 import { Markdown } from "@/core/components/Markdown";
@@ -309,7 +310,12 @@ export function ChatView({ model }: { model?: string }) {
         // of the document-wide reflow that a panel resize triggers.
         className="flex-1 overflow-y-auto px-3 py-4 space-y-4 [contain:layout_paint]"
       >
-        {turns.length === 0 && !hasFiles && <NoProjectPrompt />}
+        {/* The upload nudge normally lives on the empty diagram canvas.
+         *  Baseline runs never mount that panel, so the chat keeps it
+         *  there and those participants still get told what to do. */}
+        {turns.length === 0 && !hasFiles && getStudyMode() === "baseline" && (
+          <NoProjectPrompt />
+        )}
         {turns.length === 0 && hasFiles && <ReadyPrompt />}
         {turns.map((t, idx) => {
           // For assistant turns: look back to the immediately preceding
