@@ -45,6 +45,9 @@ import { useBlockCapabilityRefresh } from "../hooks/useBlockCapabilityRefresh";
 import { useDiagramStructureFetch } from "../hooks/useDiagramStructureFetch";
 import { useCapabilityScan } from "../hooks/useCapabilityScan";
 import { useAdaptiveFocus } from "../hooks/useAdaptiveFocus";
+import { useDiagramSearch } from "../hooks/useDiagramSearch";
+import { DiagramSearchBox } from "./overlays/DiagramSearchBox";
+import { SearchResultsTray } from "./overlays/SearchResultsTray";
 import {
   useRecentChanges,
   type PreRegenSnapshot,
@@ -94,6 +97,7 @@ export function DiagramCanvas({
   view,
   onViewChange,
   headerSlot,
+  headerSearchSlot,
   headerRightSlot,
 }: {
   view: DiagramView;
@@ -103,6 +107,8 @@ export function DiagramCanvas({
   /** DOM node in the panel header where the intent chip portals itself,
    *  so it lives in the chrome instead of floating over the canvas. */
   headerSlot?: HTMLElement | null;
+  /** Header slot for the natural-language search box. */
+  headerSearchSlot?: HTMLElement | null;
   /** Right-aligned header slot for the interaction-tracker button. */
   headerRightSlot?: HTMLElement | null;
 }) {
@@ -112,6 +118,7 @@ export function DiagramCanvas({
         view={view}
         onViewChange={onViewChange}
         headerSlot={headerSlot}
+        headerSearchSlot={headerSearchSlot}
         headerRightSlot={headerRightSlot}
       />
     </ReactFlowProvider>
@@ -122,11 +129,13 @@ function DiagramCanvasInner({
   view,
   onViewChange,
   headerSlot,
+  headerSearchSlot,
   headerRightSlot,
 }: {
   view: DiagramView;
   onViewChange: (v: DiagramView) => void;
   headerSlot?: HTMLElement | null;
+  headerSearchSlot?: HTMLElement | null;
   headerRightSlot?: HTMLElement | null;
 }) {
   const { files, chatMessages, chatRunning, projectKey, setDiagramBusy } =
@@ -283,6 +292,30 @@ function DiagramCanvasInner({
   // step the user is currently tracing back (drives a gold ring + a camera
   // move, never any state change). Declared before the glow hook so the
   // per-regen delta can feed it.
+  // Natural-language diagram search. Read-only and derived: it never
+  // writes the schema, never touches `focused`, never triggers a regen and
+  // never takes the chat lock, which is what makes it safe to use while
+  // the agent is mid-turn (the moment people actually reach for it).
+  const search = useDiagramSearch({
+    schema: viewSchema,
+    projectKey,
+    enabled: state.kind === "ready",
+  });
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchAnchorRef = useRef<HTMLDivElement>(null);
+  /** Which hit the user clicked, for the camera fly-to. Separate from the
+   *  tracker's traced step so the two highlight vocabularies stay apart. */
+  const [searchFocusId, setSearchFocusId] = useState<string | null>(null);
+  // Closing the box always releases the camera, whichever route closed it
+  // (the X, the footer button, or Escape from anywhere in the tray). Doing
+  // it here rather than in each close handler means a new way to close can
+  // never leave the viewport pinned to a block the user can no longer see
+  // highlighted.
+  const searchOpen = search.state.open;
+  useEffect(() => {
+    if (!searchOpen) setSearchFocusId(null);
+  }, [searchOpen]);
+
   const tracker = useInteractionTracker(projectKey);
   // Row assembly (chips, accent fallback, dedupe keys) lives in the
   // recorder so each change point below is a one-line record* call.
@@ -558,6 +591,21 @@ function DiagramCanvasInner({
     // muddy khaki band on tinted blocks.
     const TRACE_RING =
       "0 0 0 2px #FAFAF9, 0 0 0 5px #B0975A, 0 0 0 9px rgba(176,151,90,0.22)";
+    // Search hits ring in teal. Deliberately a third colour: gold already
+    // means "inspecting history" and blue means "this just changed", and
+    // an edit glow will very often be on screen at the same time as a
+    // search result (people search WHILE the agent edits).
+    const SEARCH_RING =
+      "0 0 0 2px #FAFAF9, 0 0 0 5px #2F7A6F, 0 0 0 9px rgba(47,122,111,0.20)";
+    const searchIds =
+      search.state.highlightIds.length > 0
+        ? new Set(search.state.highlightIds)
+        : null;
+    // Reading order, so a hit can wear its step number on the canvas and
+    // the tray's numbered list matches what the user sees in space.
+    const searchOrderById = new Map(
+      search.state.hits.map((h) => [h.blockId, h.order]),
+    );
     // Scheme resolution with the neighbor-inheritance fallback (see
     // resolveBlockColorWithFallback in color/scheme.ts, shared with the
     // connection lens so every surface agrees on a fresh block's color).
@@ -590,8 +638,14 @@ function DiagramCanvasInner({
       const dimByFan = expandedBlockId !== null && n.id !== expandedBlockId;
       const dimByLens =
         lens !== null && n.id !== lens.from && n.id !== lens.to;
-      const dim = dimByFan || dimByLens;
+      // A live search narrows the canvas to its hits. Same dimming channel
+      // as the fan and the lens, but driven by search state, NOT by
+      // `focused`: adaptive focus keeps its own channel so the two never
+      // fight (and so clearing a search restores whatever focus had).
+      const dimBySearch = searchIds !== null && !searchIds.has(n.id);
+      const dim = dimByFan || dimByLens || dimBySearch;
       const traced = tracedIds?.has(n.id) ?? false;
+      const searchHit = searchIds?.has(n.id) ?? false;
       // Resolve this block's fill + accent through the active color
       // scheme (with the neighbor-inheritance fallback above). Done here
       // (not at layout time) so switching schemes recolors without
@@ -606,13 +660,23 @@ function DiagramCanvasInner({
         // React Flow keeps `selected` true on a re-click, which would
         // leave the description open after the bubbles collapse.
         isExpanded: n.id === expandedBlockId,
+        searchOrder: searchOrderById.get(n.id),
       };
-      if (!moved && !dim && !traced) return { ...n, data };
-      // Trace ring wins over dim so a traced block is always legible.
+      if (!moved && !dim && !traced && !searchHit) return { ...n, data };
+      // Trace ring wins over dim so a traced block is always legible; the
+      // search ring wins over dim for the same reason (a hit is never
+      // dimmed, it is what the user asked to see).
       const style = traced
         ? {
             ...n.style,
             boxShadow: TRACE_RING,
+            borderRadius: 12,
+            transition: "box-shadow 200ms ease",
+          }
+        : searchHit
+        ? {
+            ...n.style,
+            boxShadow: SEARCH_RING,
             borderRadius: 12,
             transition: "box-shadow 200ms ease",
           }
@@ -643,6 +707,8 @@ function DiagramCanvasInner({
     promoted,
     allBlocks,
     tracedStep,
+    search.state.highlightIds,
+    search.state.hits,
   ]);
 
   // Global obstacle-avoiding routing with lane separation (see hook).
@@ -666,8 +732,36 @@ function DiagramCanvasInner({
         e.source === lens.from && e.target === lens.to ? e : dimEdge(e),
       );
     }
+    // A search result is a ROUTE, not a set: the arrows the reading path
+    // says to follow are drawn in the search teal and thickened, and every
+    // other arrow dims. Without this the ordering only exists in the tray.
+    if (search.state.hits.length > 0) {
+      const onPath = new Set(
+        search.state.path.flatMap((p) => [`${p.from}->${p.to}`, `${p.to}->${p.from}`]),
+      );
+      return edgesWithRoutes.map((e) =>
+        onPath.has(`${e.source}->${e.target}`)
+          ? {
+              ...e,
+              style: {
+                ...e.style,
+                stroke: "#2F7A6F",
+                strokeWidth: 2.4,
+                opacity: 1,
+                transition: "stroke 200ms ease, opacity 200ms ease",
+              },
+            }
+          : dimEdge(e),
+      );
+    }
     return edgesWithRoutes;
-  }, [edgesWithRoutes, expandedBlockId, lens]);
+  }, [
+    edgesWithRoutes,
+    expandedBlockId,
+    lens,
+    search.state.hits,
+    search.state.path,
+  ]);
 
 
   // Reset the small in-component state on USER-initiated project
@@ -832,7 +926,17 @@ function DiagramCanvasInner({
   useViewportFocusFit({ view, focused });
 
   // Camera pan to the block(s) of the tracker step the user is tracing back.
-  useTraceFit(tracedStep);
+  // One camera controller, two sources. The tracker's traced step and a
+  // clicked search hit both want a fly-to; running two useTraceFit
+  // instances would give the canvas two controllers that fight over the
+  // zoom-back-out on clear, so they merge here. The tracker wins if both
+  // are somehow live, and only the tracker paints the gold ring.
+  const cameraTrace = useMemo<TracedStep>(
+    () =>
+      tracedStep ?? (searchFocusId ? { blockIds: [searchFocusId] } : null),
+    [tracedStep, searchFocusId],
+  );
+  useTraceFit(cameraTrace);
 
   // Auto-fit during streaming + final fit + ResizeObserver-driven refit.
   const canvasContainerRef = useCanvasFit({
@@ -993,6 +1097,49 @@ function DiagramCanvasInner({
             />,
             headerSlot,
           )}
+        {/* Search box in its own header slot, plus the results tray hanging
+         *  under it. Both are gated on a ready diagram: there is nothing to
+         *  search before the schema exists. Notably NOT gated on
+         *  chatRunning, which is the point of the feature. */}
+        {state.kind === "ready" &&
+          headerSearchSlot &&
+          createPortal(
+            <div ref={searchAnchorRef}>
+              <DiagramSearchBox
+                open={search.state.open}
+                query={search.state.query}
+                loading={search.state.status === "loading"}
+                inputRef={searchInputRef}
+                onOpen={() => search.openBox("header")}
+                onQueryChange={search.setQuery}
+                onSubmit={search.submit}
+                onClose={search.close}
+              />
+            </div>,
+            headerSearchSlot,
+          )}
+        {state.kind === "ready" && search.state.open && (
+          <SearchResultsTray
+            state={search.state}
+            blocks={allBlocks}
+            arrows={allArrows}
+            files={files}
+            anchorRef={searchAnchorRef}
+            onSelectHit={(id) =>
+              setSearchFocusId((cur) => (cur === id ? null : id))
+            }
+            onReopen={(entry) => {
+              setSearchFocusId(null);
+              search.reopen(entry);
+            }}
+            onRegenerate={(entry) => {
+              setSearchFocusId(null);
+              search.regenerate(entry);
+            }}
+            onForgetHistory={search.forgetHistory}
+            onClose={search.close}
+          />
+        )}
         {/* Interaction-tracker button in the header-right slot; the tray it
          *  opens floats over the canvas' top-right corner (rendered below). */}
         {state.kind === "ready" &&

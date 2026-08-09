@@ -246,6 +246,10 @@ export type BlockNodeData = {
   isDimmed: boolean;
   /** Mirrors DiagramBlock.promotedDetail for the corner mark. */
   promotedDetail?: boolean;
+  /** 1-based position in a natural-language search's reading path. Set
+   *  only while a search result is live; drives the step badge so the
+   *  ordering exists on the canvas, not just in the results tray. */
+  searchOrder?: number;
   /** User clicked this block to drill in: the description un-clamps to
    *  full length AND the feature bubbles fan out, in lockstep. Driven by
    *  expandedBlockId (the bubble-focus state), not React Flow's

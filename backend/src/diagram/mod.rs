@@ -14,6 +14,7 @@ mod connection_detail;
 mod function_detail;
 mod handler;
 mod prompts;
+mod search;
 mod tools;
 
 pub use block_refresh::block_refresh;
@@ -21,3 +22,4 @@ pub use tools::BLOCK_CATEGORIES;
 pub use connection_detail::connection_detail;
 pub use function_detail::function_detail;
 pub use handler::generate_diagram;
+pub use search::diagram_search;

@@ -191,6 +191,14 @@ pub async fn create_web_server(
             "/api/block-refresh",
             axum::routing::post(crate::diagram::block_refresh),
         )
+        // Natural-language search over the diagram: returns an ordered
+        // reading path (block ids + arrows). Stateless one-shot, schema
+        // only, no file contents, so it stays usable while the chat
+        // session is busy writing code.
+        .route(
+            "/api/diagram-search",
+            axum::routing::post(crate::diagram::diagram_search),
+        )
         // Batch ingest for the interaction log (user-study telemetry).
         // Fire-and-forget from the frontend; rows keyed by guest cookie.
         .route(

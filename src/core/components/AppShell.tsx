@@ -331,6 +331,13 @@ function DiagramPanel() {
   const [headerRightSlot, setHeaderRightSlot] = useState<HTMLElement | null>(
     null,
   );
+  // Slot for the diagram search box. Its own slot rather than sharing the
+  // right-hand one: two features portaling into a single node would have
+  // their order decided by render order, which is not something either
+  // should depend on.
+  const [headerSearchSlot, setHeaderSearchSlot] = useState<HTMLElement | null>(
+    null,
+  );
   return (
     <div className={PANEL}>
       {/* relative z-30 so the intent chip's popover can hang below the header
@@ -341,6 +348,7 @@ function DiagramPanel() {
           ref={setHeaderSlot}
           className="flex min-w-0 flex-1 items-center justify-start"
         />
+        <div ref={setHeaderSearchSlot} className="flex shrink-0 items-center" />
         <div ref={setHeaderRightSlot} className="flex shrink-0 items-center" />
       </div>
       <div className="min-h-0 flex-1">
@@ -348,6 +356,7 @@ function DiagramPanel() {
           view={view}
           onViewChange={setView}
           headerSlot={headerSlot}
+          headerSearchSlot={headerSearchSlot}
           headerRightSlot={headerRightSlot}
         />
       </div>

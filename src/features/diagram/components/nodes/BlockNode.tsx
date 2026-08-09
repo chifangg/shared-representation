@@ -106,6 +106,17 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
       className={`block-node-grow group/block relative rounded-[5px] border bg-white px-3 py-2 transition-all ${borderColor} ${ring} ${dim}`}
       style={{ width: NODE_W, minHeight: NODE_H, ...catStyle }}
     >
+      {/* Reading-order badge while a search result is live. Sits outside
+       *  the top-left corner so it reads as an annotation ON the block
+       *  rather than part of it, and so it never covers the label. */}
+      {data.searchOrder !== undefined && (
+        <span
+          title={`Step ${data.searchOrder} in the reading order`}
+          className="absolute -left-2 -top-2 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[#2F7A6F] text-[10.5px] font-semibold text-white shadow-[0_1px_3px_rgba(51,50,47,0.35)]"
+        >
+          {data.searchOrder}
+        </span>
+      )}
       {/* Small corner mark on a block promoted out of a detail view, so
        *  back on the overview it reads as a lifted detail rather than a
        *  top-level module. Same glyph the tracker uses for "promoted",
