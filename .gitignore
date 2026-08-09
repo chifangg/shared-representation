@@ -38,6 +38,22 @@ AGENTS.md
 
 .env
 
+# Local study / research material (not part of the tool itself)
+/STATUS.md
+/scripts/
+/shared-rep-study/
+/shared-rep-study.zip
+/study-survey-and-interview-questions.pdf
+/docs/chi-paper-skeleton.md
+/docs/chi-writing-template.md
+/docs/moderator-protocol.md
+/docs/pilot-study.md
+/docs/project-selection.md
+/docs/user-study-plan.md
+/docs/instruments/
+/docs/samples/
+/docs/tasks/
+
 # Python (any branch that adds a Python sidecar / venv)
 .venv/
 __pycache__/
