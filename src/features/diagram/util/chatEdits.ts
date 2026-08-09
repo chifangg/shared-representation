@@ -45,8 +45,27 @@ export function isUserPrompt(m: ClaudeMessage): boolean {
 const EDIT_TOOLS = new Set(["edit_project_file", "write_project_file"]);
 function isEditTool(name: string | undefined): boolean {
   if (!name) return false;
-  const bare = name.includes("__") ? name.slice(name.lastIndexOf("__") + 2) : name;
+  const bare = bareToolName(name);
   return EDIT_TOOLS.has(bare);
+}
+
+/** Tools that TOUCH a specific file, edit or read alike. The live
+ *  "working here" pulse uses this wider set: while a turn runs, the
+ *  agent spends most of it reading the files around a hook point before
+ *  it writes, so tracking reads too makes the pulse move across the
+ *  diagram in real time instead of flashing once at the final write. */
+const FILE_TOOLS = new Set([
+  "edit_project_file",
+  "write_project_file",
+  "read_project_file",
+]);
+function isFileTool(name: string | undefined): boolean {
+  if (!name) return false;
+  return FILE_TOOLS.has(bareToolName(name));
+}
+
+function bareToolName(name: string): string {
+  return name.includes("__") ? name.slice(name.lastIndexOf("__") + 2) : name;
 }
 
 /**
@@ -84,4 +103,38 @@ export function editedFilesInLatestTurn(messages: ClaudeMessage[]): {
     }
   }
   return { files: Array.from(files), textChunks };
+}
+
+/**
+ * File paths TOUCHED (read or edited) in the latest assistant turn, for
+ * the live "the agent is working here" pulse. Same walk as
+ * `editedFilesInLatestTurn` but the wider FILE_TOOLS set, so a block
+ * lights up while the agent is reading its file, not only at the moment
+ * it writes. Kept separate from `editedFilesInLatestTurn`, which must
+ * stay edit-only: reads must not trigger the post-turn regen or count as
+ * changes.
+ */
+export function touchedFilesInLatestTurn(messages: ClaudeMessage[]): string[] {
+  const files = new Set<string>();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isUserPrompt(messages[i])) break;
+    const m = messages[i] as AnyMsg;
+    if (m.type !== "assistant") continue;
+    const content = m.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const b of content as Array<{
+      type?: string;
+      name?: string;
+      input?: { path?: string };
+    }>) {
+      if (
+        b?.type === "tool_use" &&
+        isFileTool(b.name) &&
+        typeof b.input?.path === "string"
+      ) {
+        files.add(b.input.path);
+      }
+    }
+  }
+  return Array.from(files);
 }
