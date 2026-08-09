@@ -1,4 +1,4 @@
-import { BookOpen, Copy, MessageCircle, PenLine, X } from "lucide-react";
+import { BookOpen, Compass, Copy, PenLine, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import type {
@@ -9,21 +9,22 @@ import type {
 } from "../../types";
 import {
   CapabilityStep,
-  OtherStep,
+  DEFAULT_GOAL,
   UnderstandStep,
   composeGoal,
 } from "./IntentSurveySteps";
 
 /**
  * Onboarding survey modal. Blocks the diagram structure fetch until the
- * user answers two questions:
+ * user answers:
  *
- *   1. Verb — Understand / Edit / Reference / Other
+ *   1. Verb — Understand / Edit / Reference / Default
  *   2. Branched follow-up:
  *      - Understand → role multi-select + optional detail text
  *      - Edit / Reference → pick one or more capability candidates
  *        (from the parallel capability_scan) OR free text
- *      - Other → free text
+ *      - Default → no follow-up: submits immediately with the
+ *        study-designed DEFAULT_GOAL (a task-aligned map)
  *
  * The composed goal string flows into buildProjectContext as `<user_goal>`,
  * shaping the capability-centric overview prompt.
@@ -69,10 +70,10 @@ export const VERBS: VerbSpec[] = [
     accent: "#7C8C63",
   },
   {
-    value: "other",
-    label: "Other",
-    hint: "Tell me in your own words",
-    icon: MessageCircle,
+    value: "default",
+    label: "Default",
+    hint: "A ready-made map for the tasks ahead",
+    icon: Compass,
     tint: "#ECE9E4",
     accent: "#8A8178",
   },
@@ -94,8 +95,10 @@ export function IntentSurvey({
    *  first-time onboarding, which must be answered. */
   onCancel?: () => void;
 }) {
+  // Revising a "default" pick reopens at the verb grid: that verb has no
+  // follow-up step to land on, and the natural revision is choosing again.
   const [verb, setVerb] = useState<IntentVerb | null>(
-    initialSelection?.verb ?? null,
+    initialSelection?.verb === "default" ? null : (initialSelection?.verb ?? null),
   );
   const [understandCaps, setUnderstandCaps] = useState<CapabilityCandidate[]>(
     initialSelection?.understandCaps ?? [],
@@ -109,7 +112,6 @@ export function IntentSurvey({
   const [capFreeText, setCapFreeText] = useState(
     initialSelection?.capFreeText ?? "",
   );
-  const [otherText, setOtherText] = useState(initialSelection?.otherText ?? "");
 
   const toggleUnderstandCap = (c: CapabilityCandidate) =>
     setUnderstandCaps((prev) =>
@@ -130,7 +132,6 @@ export function IntentSurvey({
       return understandCaps.length > 0 || understandText.trim().length > 0;
     if (verb === "edit" || verb === "reference")
       return capabilities.length > 0 || capFreeText.trim().length > 0;
-    if (verb === "other") return otherText.trim().length > 0;
     return false;
   })();
 
@@ -142,11 +143,23 @@ export function IntentSurvey({
       understandText,
       capabilities,
       capFreeText,
-      otherText,
     };
     const goal = composeGoal(selection);
     if (!goal.trim()) return;
     onComplete(goal, selection);
+  };
+
+  /** The Default card is one click: no follow-up step, the goal is the
+   *  study-designed task-aligned prompt, and every participant who picks
+   *  it gets the same initial diagram conditions. */
+  const handleDefaultPick = () => {
+    onComplete(DEFAULT_GOAL, {
+      verb: "default",
+      understandCaps: [],
+      understandText: "",
+      capabilities: [],
+      capFreeText: "",
+    });
   };
 
   const activeVerb = VERBS.find((v) => v.value === verb) ?? null;
@@ -209,7 +222,9 @@ export function IntentSurvey({
                 <button
                   key={v.value}
                   type="button"
-                  onClick={() => setVerb(v.value)}
+                  onClick={() =>
+                    v.value === "default" ? handleDefaultPick() : setVerb(v.value)
+                  }
                   style={{ animationDelay: `${i * 55}ms` }}
                   className="survey-rise group flex items-start gap-3 rounded-2xl border border-white/70 bg-white/75 px-3.5 py-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[#D8CFC2] hover:bg-white hover:shadow-[0_10px_26px_-14px_rgba(60,53,47,0.5)]"
                 >
@@ -251,10 +266,6 @@ export function IntentSurvey({
               freeText={capFreeText}
               setFreeText={setCapFreeText}
             />
-          )}
-
-          {verb === "other" && (
-            <OtherStep text={otherText} setText={setOtherText} />
           )}
 
           {verb && (

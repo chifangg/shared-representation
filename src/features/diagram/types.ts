@@ -116,7 +116,7 @@ export type CapabilityScanState =
   | { kind: "ready"; candidates: CapabilityCandidate[] }
   | { kind: "error"; message: string };
 
-export type IntentVerb = "understand" | "edit" | "reference" | "other";
+export type IntentVerb = "understand" | "edit" | "reference" | "default";
 
 /** Fired when the user clicks an arrow-label pill: open the connection
  *  lenses for that relationship, anchored at the click point. */
@@ -148,7 +148,6 @@ export type IntentSelection = {
   understandText: string;
   capabilities: CapabilityCandidate[];
   capFreeText: string;
-  otherText: string;
 };
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,31 @@ import { capabilityIcon } from "../../util/capabilityIcon";
  * edit, or reference, or describe it in their own words instead.
  */
 
+/**
+ * The goal behind the Default card: a study-designed steer, kept to the
+ * BIG direction on purpose. An earlier version enumerated every pipeline
+ * stage and mechanism; the model then split each named thing into its
+ * own block and blew past the prompt's 4-8 cap (~13 blocks). Naming the
+ * kind of work instead lets the base prompt's structure rules hold while
+ * still pulling the map toward what the tasks touch.
+ *
+ * It names no feature that only a later task reveals (back-references,
+ * numbering resets, merging extensions), so a participant who has read
+ * only the first brief learns nothing early. Note a hard limit of the
+ * initial map: the files the tasks CREATE (callout.py, panel.py,
+ * structure.py) do not exist yet, so the diagram can only show the
+ * conversion flow and the existing extension points where that new code
+ * will plug in; the task's own modules appear once the participant
+ * writes them and the diagram regenerates.
+ */
+export const DEFAULT_GOAL =
+  "I am going to extend this Markdown library: adding new block and " +
+  "inline syntaxes, giving elements ids and anchors, cross-referencing " +
+  "between parts of a document, and numbering things. Map the codebase " +
+  "so I can understand how a document is converted from Markdown to " +
+  "HTML and, above all, where extensions plug into that flow, so I can " +
+  "see where work like this belongs.";
+
 const SECTION_LABEL = "text-[12px] font-semibold text-[#5C544B]";
 const TEXT_FIELD =
   "w-full rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-[13px] text-[#2A2622] outline-none transition-colors placeholder:text-[#B6AC9E] hover:border-[#D8CFC2] focus:border-[#C9B58E]";
@@ -45,7 +70,8 @@ export function composeGoal(params: IntentSelection): string {
       ? `Want to edit: ${target}.`
       : `Looking for a reference of: ${target}.`;
   }
-  return params.otherText.trim();
+  // "default": the study-designed, task-aligned prompt.
+  return DEFAULT_GOAL;
 }
 
 /** Short, human-readable "what you picked" line for the intent chip. Just
@@ -62,7 +88,7 @@ export function intentSummary(s: IntentSelection): string {
       return s.capabilities.map((c) => c.label).join(", ");
     return s.capFreeText.trim();
   }
-  return s.otherText.trim();
+  return "a ready-made map for working on this codebase";
 }
 
 function ScanStatus({ scanState }: { scanState: CapabilityScanState }) {
@@ -255,21 +281,3 @@ export function CapabilityStep({
   );
 }
 
-export function OtherStep({
-  text,
-  setText,
-}: {
-  text: string;
-  setText: (s: string) => void;
-}) {
-  return (
-    <textarea
-      autoFocus
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      placeholder="What do you want to do here? Be as specific as you like."
-      rows={4}
-      className={`survey-rise resize-none ${TEXT_FIELD}`}
-    />
-  );
-}

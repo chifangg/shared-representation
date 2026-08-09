@@ -9,7 +9,7 @@
 /// participates in prompt caching when paired with `cache_control` on
 /// the system content block.
 pub(super) const STRUCTURE_SYSTEM: &str = "You are generating a CAPABILITY MAP of a software project — a diagram that helps the user navigate the codebase BY WHAT IT DOES, not by file structure.\n\n\
-VIEW: capability-centric overview. Identify 4–8 user-facing capabilities — the things the project DOES from the perspective of someone using or extending it. Use plain user vocabulary, not engineering jargon.\n\n\
+VIEW: capability-centric overview. Identify 4 to 8 user-facing capabilities (HARD CEILING of 8, never more) — the things the project DOES from the perspective of someone using or extending it. Use plain user vocabulary, not engineering jargon.\n\n\
 Examples of capability-centric blocks (depending on project type):\n\
 - Portfolio site: \"Content sections (experience, publications, projects)\", \"Theming & appearance\", \"Interactions (color switcher, navigation)\", \"Layout & structure\".\n\
 - CLI tool: \"Argument parsing\", \"Subcommand handlers\", \"Output formatting\", \"Configuration & defaults\".\n\
@@ -24,7 +24,7 @@ If a `<user_goal>` block appears inside `<project_context>`, READ IT FIRST and l
 - If the goal mentions a role (e.g. \"security engineer\", \"frontend developer\"), pick the decomposition that matches that lens. A security engineer on a webapp wants \"Data inputs & forms\", \"Authentication\", \"External resource loading\" surfaced; a frontend developer on the same app wants \"Theming\", \"Component composition\", \"Interactions\" surfaced.\n\
 - If no `<user_goal>` is present, produce a balanced generic capability map covering all major user-facing aspects.\n\n\
 RULES:\n\
-- 4–8 blocks. Use the `parent` field if multiple blocks naturally nest under one larger capability.\n\
+- 4 to 8 blocks, and NEVER more than 8. This is a hard limit, not a target. If a richer codebase tempts you past 8, MERGE the most closely related capabilities into one coarser block (and use its `capabilities` list for the detail) rather than emitting a ninth. Fewer, well-chosen blocks read better than an exhaustive one. Use the `parent` field if multiple blocks naturally nest under one larger capability.\n\
 - Stable readable id derived from label (e.g. \"content_sections\", \"theming\").\n\
 - Caption is one short sentence in user language: what this capability does for the user AS A WHOLE. Do NOT enumerate the specific functions, methods or sub-steps — those surface separately via `provenance.functions` and the UI renders them as their own affordance. Bad: \"Scrapes pages, downloads images, saves JSON\". Good: \"Pulls chat logs and assets from the source site\".\n\
 - Every block MUST carry a `category`, exactly one of interface, logic, data, state, integration, config. Judge it on two axes. BOUNDARY: interface = the inbound edge the outside reaches in through (UI / API endpoints / CLI); integration = the outbound edge this project calls out to. INTERNAL ROLE: logic = stateless processing/rules/business logic; state = runtime state held across calls but not persisted (stores, session, caches); data = persistent or shared data (models, schemas, databases, files). config = off the runtime path (setup/build/theming/infra). When a block spans two, pick the SINGLE role that dominates why it exists. The UI color-codes by category so the user can chunk the map at a glance.\n\
@@ -40,7 +40,7 @@ Emit each block by calling the `block` tool and each arrow (if any) by calling t
 EMISSION PROTOCOL — IMPORTANT:\n\
 - Emit ALL of your tool calls in a SINGLE assistant response (parallel tool calls). Do not stop after one tool call to wait for results.\n\
 - Every tool_result you get back will simply be \"ok\" — there is no information to wait for. The tool calls are how you write your output; they are not interactive queries.\n\
-- A correct response for this view is approximately 4-8 `block` calls + 0-6 `arrow` calls + 1 `done` call, ALL in the same response.";
+- A correct response for this view is 4 to 8 `block` calls (never more than 8) + 0-6 `arrow` calls + 1 `done` call, ALL in the same response. If you have written more than 8 block calls, you have gone wrong: stop, merge related ones, and keep it to 8.";
 
 /// System prompt for the "focus" view.
 pub(super) const FOCUS_SYSTEM: &str = "You are computing an ADAPTIVE FOCUS overlay for an existing project diagram. \
