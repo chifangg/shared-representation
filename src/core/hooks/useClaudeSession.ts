@@ -97,7 +97,16 @@ export function useClaudeSession(opts: UseClaudeSessionOptions) {
       // is usually the generic exit-code message).
       const line = String((e as CustomEvent).detail);
       setError((prev) => (prev ? `${prev}\n${line}` : line));
-      setStatus("error");
+      // A stderr line does NOT end the turn. The CLI writes warnings there
+      // too, and flipping to "error" mid-run ended the turn as far as the
+      // rest of the app was concerned: `running` went false, the settle
+      // effect fired its false edge early, and everything keyed on it (the
+      // diagram regen, the "Updated the diagram" record, the search nudge)
+      // was computed against a turn that had not made its edits yet.
+      // Process exit is the authority: completeHandler below, which also
+      // covers a dropped socket (apiAdapter's onclose sends a failed
+      // completion). Only classify as an error if nothing is running.
+      setStatus((prev) => (prev === "running" ? prev : "error"));
     };
     const completeHandler = (e: Event) => {
       const ok = Boolean((e as CustomEvent).detail);

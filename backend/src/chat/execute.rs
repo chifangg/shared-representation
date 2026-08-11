@@ -15,7 +15,7 @@ use super::args::{
 };
 use super::binary::find_claude_binary_web;
 use super::bridge::prepare_tool_bridge;
-use super::session::{chat_sandbox_dir, send_to_session};
+use super::session::{chat_sandbox_dir, send_to_session, spawn_stderr_drain};
 
 pub(super) async fn execute_claude_command(
     project_path: String,
@@ -109,6 +109,11 @@ pub(super) async fn execute_claude_command(
     cmd.current_dir(&effective_cwd);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    // Null stdin, not inherited. The prompt goes in via argv, so the CLI has
+    // nothing to read here; inheriting the backend's stdin made it wait 3s
+    // for input that never comes and then warn about it on every single
+    // turn. Closing it says "there is no stdin" up front.
+    cmd.stdin(std::process::Stdio::null());
 
     println!(
         "[TRACE] Command: {} {:?} (cwd: {})",
@@ -136,25 +141,7 @@ pub(super) async fn execute_claude_command(
     let stdout_reader = BufReader::new(stdout);
 
     if let Some(stderr) = child.stderr.take() {
-        let stderr_state = state.clone();
-        let stderr_session = session_id.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("[CLAUDE STDERR] {}", line);
-                send_to_session(
-                    &stderr_state,
-                    &stderr_session,
-                    json!({
-                        "type": "error",
-                        "message": line,
-                        "session_id": stderr_session,
-                    })
-                    .to_string(),
-                )
-                .await;
-            }
-        });
+        spawn_stderr_drain(state.clone(), session_id.clone(), stderr);
     }
 
     // Register a cancel channel so `/api/sessions/:id/cancel` can interrupt

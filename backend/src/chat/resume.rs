@@ -11,7 +11,7 @@ use super::args::{
 };
 use super::binary::find_claude_binary_web;
 use super::bridge::prepare_tool_bridge;
-use super::session::{chat_sandbox_dir, send_to_session};
+use super::session::{chat_sandbox_dir, send_to_session, spawn_stderr_drain};
 
 pub(super) async fn resume_claude_command(
     project_path: String,
@@ -83,6 +83,8 @@ pub(super) async fn resume_claude_command(
     cmd.current_dir(&effective_cwd);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    // See execute.rs: inherited stdin makes the CLI stall 3s and warn.
+    cmd.stdin(std::process::Stdio::null());
 
     let mut child = cmd
         .spawn()
@@ -92,25 +94,7 @@ pub(super) async fn resume_claude_command(
     let stdout_reader = BufReader::new(stdout);
 
     if let Some(stderr) = child.stderr.take() {
-        let stderr_state = state.clone();
-        let stderr_session = session_id.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("[CLAUDE STDERR] {}", line);
-                send_to_session(
-                    &stderr_state,
-                    &stderr_session,
-                    json!({
-                        "type": "error",
-                        "message": line,
-                        "session_id": stderr_session,
-                    })
-                    .to_string(),
-                )
-                .await;
-            }
-        });
+        spawn_stderr_drain(state.clone(), session_id.clone(), stderr);
     }
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::channel::<()>(1);
