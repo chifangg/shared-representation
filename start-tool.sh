@@ -5,17 +5,61 @@
 #                             paste into the confirmation form
 #   ./start-tool.sh           start the tool for a session
 #
+# Moderator escape hatch:
+#   ./start-tool.sh --no-build   skip the frontend rebuild and run
+#                                whatever is already in dist/
+#
+# The backend serves the frontend from dist/ on disk, NOT from src/, so a
+# session runs whatever was last built. `cargo run` rebuilds the Rust, but
+# nothing rebuilds the bundle, which meant a stale dist/ could silently
+# serve a months-old UI from a current checkout. Both modes below now
+# account for that: launching rebuilds first, and --check fails when the
+# bundle is older than the sources it came from.
+#
 # See INSTALL.md for the one-time setup this assumes.
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Everything the frontend bundle is built from. If any of these is newer
+# than dist/index.html, the bundle on disk does not match the checkout.
+frontend_sources() {
+  local candidates=(src index.html vite.config.ts package.json tsconfig.json)
+  local found=()
+  local p
+  for p in "${candidates[@]}"; do
+    if [ -e "$p" ]; then found+=("$p"); fi
+  done
+  printf '%s\n' "${found[@]}"
+}
+
+# 0 (true) when dist/ is missing or older than any frontend source.
+frontend_stale() {
+  [ -f dist/index.html ] || return 0
+  local newer
+  # -quit stops at the first offender, so this stays fast on a big tree.
+  newer=$(find $(frontend_sources) -newer dist/index.html -print -quit 2>/dev/null || true)
+  [ -n "$newer" ]
+}
+
 if [ "${1:-}" = "--check" ]; then
   ok=1
   echo "commit: $(git rev-parse --short HEAD)"
-  if [ -f dist/index.html ]; then
-    echo "frontend build: ok"
-  else
+  # Existing-but-stale is the dangerous case: the check would pass, the
+  # confirmation form would look clean, and the session would still run an
+  # old UI that does not match the commit printed above.
+  if [ ! -f dist/index.html ]; then
     echo "frontend build: MISSING (run: bun run build)"
+    ok=0
+  elif frontend_stale; then
+    echo "frontend build: STALE (run: bun run build)"
+    ok=0
+  else
+    echo "frontend build: ok"
+  fi
+  if command -v bun >/dev/null 2>&1; then
+    echo "bun: ok"
+  else
+    echo "bun: MISSING (needed to build the frontend, see INSTALL.md)"
     ok=0
   fi
   if [ -x backend/target/debug/claude-ui-app ]; then
@@ -51,6 +95,28 @@ if [ "${1:-}" = "--check" ]; then
     exit 1
   fi
   exit 0
+fi
+
+# Rebuild the frontend unless explicitly told not to. `cargo run` below
+# already keeps the backend current; this keeps the bundle current too, so
+# "I pulled the changes but the tool looks the same" cannot happen.
+if [ "${1:-}" = "--no-build" ]; then
+  echo "Skipping the frontend build (--no-build)."
+  if frontend_stale; then
+    echo "WARNING: dist/ is older than src/. The tool will run an OLD interface."
+  fi
+elif ! command -v bun >/dev/null 2>&1; then
+  echo "bun is not installed, so the frontend cannot be rebuilt."
+  echo "See INSTALL.md. Continuing with whatever is already in dist/."
+  if frontend_stale; then
+    echo "WARNING: dist/ is older than src/. The tool will run an OLD interface."
+  fi
+elif frontend_stale; then
+  echo "Building the interface (this takes a few seconds)..."
+  bun run build
+  echo "Interface built."
+else
+  echo "Interface is already up to date."
 fi
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
