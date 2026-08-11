@@ -127,16 +127,29 @@ export function SearchResultsTray({
   const [edgeDetail, setEdgeDetail] = useState<
     Record<string, DetailState<EdgeDetail>>
   >({});
-  const [openRow, setOpenRow] = useState<string | null>(null);
-  const [openEdge, setOpenEdge] = useState<string | null>(null);
+  // Sets, not single ids: the tray is a READING PATH, so opening step 3
+  // must not close step 2. Comparing what two steps do is the whole reason
+  // to drill in, and an accordion made that impossible without re-reading.
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [openEdges, setOpenEdges] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const toggleIn = (key: string) => (prev: ReadonlySet<string>) => {
+    const next = new Set(prev);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  };
 
   // Drill-ins are keyed by block/arrow id, so a fresh query must drop them
   // or a stale expansion can reappear under a different result.
   useEffect(() => {
     setBlockDetail({});
     setEdgeDetail({});
-    setOpenRow(null);
-    setOpenEdge(null);
+    setOpenRows(new Set());
+    setOpenEdges(new Set());
   }, [state.answer, state.query]);
 
   const filesFor = useCallback(
@@ -452,12 +465,12 @@ export function SearchResultsTray({
           {state.hits.map((hit, i) => {
             const block = blocks.find((b) => b.id === hit.blockId);
             const detail = blockDetail[hit.blockId] ?? { kind: "idle" as const };
-            const expanded = openRow === hit.blockId;
+            const expanded = openRows.has(hit.blockId);
             const conn = connectorAfter(i);
             const cKey = conn ? edgeKey(conn.from, conn.to) : null;
             const cDetail =
               cKey ? edgeDetail[cKey] ?? { kind: "idle" as const } : null;
-            const cOpen = cKey !== null && openEdge === cKey;
+            const cOpen = cKey !== null && openEdges.has(cKey);
             const verb =
               conn &&
               (arrows.find(
@@ -504,9 +517,8 @@ export function SearchResultsTray({
                       type="button"
                       title="Explain from the code"
                       onClick={() => {
-                        const next = expanded ? null : hit.blockId;
-                        setOpenRow(next);
-                        if (next) loadBlockDetail(hit);
+                        setOpenRows(toggleIn(hit.blockId));
+                        if (!expanded) loadBlockDetail(hit);
                       }}
                       className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded text-[#8A8880] transition-colors hover:bg-black/[0.06] hover:text-[#33322F]"
                     >
@@ -559,9 +571,8 @@ export function SearchResultsTray({
                     <button
                       type="button"
                       onClick={() => {
-                        const next = cOpen ? null : cKey;
-                        setOpenEdge(next);
-                        if (next) loadEdgeDetail(conn.from, conn.to);
+                        setOpenEdges(toggleIn(cKey));
+                        if (!cOpen) loadEdgeDetail(conn.from, conn.to);
                       }}
                       className="flex items-center gap-1 py-1 text-[11px] text-[#6E6D68] transition-colors hover:text-[#2F7A6F]"
                     >

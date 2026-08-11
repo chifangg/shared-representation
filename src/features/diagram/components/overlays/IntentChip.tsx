@@ -51,7 +51,11 @@ export function IntentChip({
         : [];
 
   return (
-    <div className="relative">
+    // min-w-0 on both wrapper and button: the header slot is the flexible
+    // one, so when the panel narrows it shrinks to a sliver. Without this
+    // the button keeps its intrinsic width and paints over its neighbours
+    // instead of shrinking with its slot.
+    <div className="relative min-w-0">
       <button
         type="button"
         onClick={() => {
@@ -62,7 +66,7 @@ export function IntentChip({
         }}
         aria-expanded={open}
         title="Your current focus. Click to see what the diagram is emphasizing."
-        className={`flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2 transition-colors ${
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2 transition-colors ${
           open
             ? "rounded-bl-none bg-black/[0.07]"
             : "hover:bg-black/[0.05]"
@@ -77,7 +81,7 @@ export function IntentChip({
           </span>
         )}
         <span
-          className="text-[12px] font-semibold leading-none"
+          className="min-w-0 truncate text-[12px] font-semibold leading-none"
           style={{ color: meta?.accent }}
         >
           {meta?.label}

@@ -32,6 +32,7 @@ import { useProject } from "@/core/project";
 import { useChatActivity } from "@/core/chatActivity";
 import { logEvent } from "@/core/interactionLog";
 import { DiagramActionEntry } from "./overlays/DiagramActionEntry";
+import { DiagramSearchNudge } from "./overlays/DiagramSearchNudge";
 import {
   type BlockCategory,
   type BlockNodeData,
@@ -46,6 +47,7 @@ import { useDiagramStructureFetch } from "../hooks/useDiagramStructureFetch";
 import { useCapabilityScan } from "../hooks/useCapabilityScan";
 import { useAdaptiveFocus } from "../hooks/useAdaptiveFocus";
 import { useDiagramSearch } from "../hooks/useDiagramSearch";
+import { buildNudgeQuery } from "../util/nudgeQuery";
 import { DiagramSearchBox } from "./overlays/DiagramSearchBox";
 import { SearchResultsTray } from "./overlays/SearchResultsTray";
 import {
@@ -316,6 +318,29 @@ function DiagramCanvasInner({
     if (!searchOpen) setSearchFocusId(null);
   }, [searchOpen]);
 
+  // A search the user did not type: the chat nudge card fires this after a
+  // code-editing turn. The queue is the point, not incidental: the nudge
+  // appears at the settle edge, which is EXACTLY when the diagram is
+  // mid-regen and `enabled` is false, so an eager click would otherwise be
+  // swallowed by the guard inside `ask` and the button would read as dead.
+  // Hold it and fire once the schema is back.
+  const pendingAskRef = useRef<string | null>(null);
+  const searchAsk = search.ask;
+  useDiagramBusSubscribe("diagram-search-ask", ({ query }) => {
+    // A stale camera pin must not survive into a new result; DiagramCanvas
+    // otherwise only releases it on close.
+    setSearchFocusId(null);
+    if (state.kind === "ready") searchAsk(query);
+    else pendingAskRef.current = query;
+  });
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    const queued = pendingAskRef.current;
+    if (!queued) return;
+    pendingAskRef.current = null;
+    searchAsk(queued);
+  }, [state.kind, searchAsk]);
+
   const tracker = useInteractionTracker(projectKey);
   // Row assembly (chips, accent fallback, dedupe keys) lives in the
   // recorder so each change point below is a one-line record* call.
@@ -408,6 +433,25 @@ function DiagramCanvasInner({
       "agent",
       `diagram-updated:${seq}:${labels.join("|")}`,
     );
+    // ...and directly under it, the nudge: the reply says WHAT changed, this
+    // offers the reading path for how it fits together. Pushed as its own
+    // entry (same afterSeq) rather than folded into the chip so the record
+    // of what happened stays separate from the invitation to explore it.
+    // Insertion order decides the render order, so this lands beneath.
+    const nudgeQuery = buildNudgeQuery(labels);
+    if (nudgeQuery) {
+      pushChatActivity({
+        id: `nudge:${seq}:${labels.join("|")}`,
+        afterSeq: seq,
+        node: <DiagramSearchNudge query={nudgeQuery} />,
+      });
+      logEvent(
+        "diagram-search-nudge-shown",
+        { query: nudgeQuery, blocks: labels },
+        "agent",
+        `nudge-shown:${seq}:${labels.join("|")}`,
+      );
+    }
     // NOTE: the tracker's "edited" row is NOT recorded here. Card edits (block
     // "..." / bubble) are recorded immediately from the known target in the
     // option-executed subscriber above; typed-chat edits come from the
@@ -1086,9 +1130,16 @@ function DiagramCanvasInner({
             onCancel={visualEdit.handleIntentGateCancel}
           />
         )}
+        {/* The intent chip yields the header to the open search box. The
+         *  panel is not wide enough for both: the chip's slot is the
+         *  flexible one, so it collapses to a few pixels while the chip
+         *  itself keeps its intrinsic width and bleeds under the search
+         *  field. Hiding it is honest (search is what the user is doing
+         *  right now) and it comes straight back on close. */}
         {state.kind === "ready" &&
           intentCtl.intent !== null &&
           !intentCtl.editingIntent &&
+          !search.state.open &&
           headerSlot &&
           createPortal(
             <IntentChip

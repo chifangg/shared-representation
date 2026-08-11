@@ -72,7 +72,20 @@ export type DiagramBusMessageMap = {
    * applies it to the current schema best-effort, matched by block label.
    */
   "diagram-op": DiagramOpDetail;
+
+  /**
+   * Chat nudge -> Diagram. A search the user did not type: open the search
+   * box with this query and run it. Emitted by the nudge card the diagram
+   * pushes into the transcript after a code-editing turn, so the reading
+   * path for what just changed is one click away. Read-only on the
+   * diagram's side: it never regens and never takes the chat lock.
+   */
+  "diagram-search-ask": DiagramSearchAskDetail;
 };
+
+/** Payload for the "diagram-search-ask" topic. `source` is carried so the
+ *  interaction log can tell a nudged search from a typed one. */
+export type DiagramSearchAskDetail = { query: string; source: "nudge" };
 
 /** Payload for the "diagram-op" topic: a chat-initiated edit of the
  *  diagram view (block matched by its displayed label). */

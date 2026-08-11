@@ -9,7 +9,9 @@
  * channel), never triggers a regen, and never takes the chat lock. A
  * feature that only reads cannot interfere with the agent, which is the
  * whole point: people search WHILE the agent writes code, so search must
- * be usable at exactly the moment the rest of the diagram is busy.
+ * be usable at exactly the moment the rest of the diagram is busy. That
+ * holds for `ask` too, the one entry point a caller outside the box can
+ * use (the chat nudge): it opens the box and runs a query, nothing more.
  *
  * Two tiers feed one result surface:
  *   - tier 0 (`lexicalHits`) is recomputed synchronously on every
@@ -248,6 +250,26 @@ export function useDiagramSearch({
   const submit = useCallback(() => run(), [run]);
 
   /**
+   * Fire a search the user did not type: open the box, show the question,
+   * run it. This is the one programmatic entry point into search (the chat
+   * nudge card uses it via the "diagram-search-ask" bus topic).
+   *
+   * The query is passed to `run` explicitly rather than through
+   * `setQuery` + `submit`: `run` closes over the `query` state, so a
+   * same-tick submit would fire the PREVIOUS query.
+   */
+  const ask = useCallback(
+    (q: string) => {
+      if (!enabled) return;
+      setOpen(true);
+      setQuery(q);
+      run(q);
+      logEvent("diagram-search-ask", { query: q });
+    },
+    [enabled, run],
+  );
+
+  /**
    * Re-ask a past question against the diagram as it is now.
    *
    * The point of this over reopen: reopen restores the stored answer,
@@ -425,6 +447,7 @@ export function useDiagramSearch({
     state,
     setQuery,
     submit,
+    ask,
     openBox,
     close,
     clear,
