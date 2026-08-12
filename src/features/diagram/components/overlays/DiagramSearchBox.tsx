@@ -95,28 +95,33 @@ export function DiagramSearchBox({
         placeholder="What do you want to understand?"
         className="min-w-0 flex-1 bg-transparent text-[12.5px] text-[#33322F] outline-none placeholder:text-[#A9A69E]"
       />
-      {/* Enter-to-search hint. Typing already shows instant name matches,
-       *  but the full answer + ordered reading path only comes on Enter,
-       *  and a pilot never pressed it without being told. The hint brightens
-       *  to teal once there is a query worth submitting. */}
-      {!loading && (
-        <span
-          title="Press Enter for a full answer and a reading path"
-          className={`flex shrink-0 items-center gap-1 whitespace-nowrap text-[10.5px] font-medium ${
-            query.trim() ? "text-[#2F7A6F]" : "text-[#A9A69E]"
-          }`}
+      {/* The submit affordance, in the field rather than in the tray.
+       *
+       *  Enter has always run the semantic pass, and the tray has always
+       *  said so, but the hint sits below the box while the user's eyes and
+       *  cursor are inside it, and the instant lexical matches make the
+       *  tray look answered already. Showing the key here does two jobs at
+       *  once: it teaches the shortcut where the typing happens, and it is
+       *  a real button, so anyone who does not take the hint can still get
+       *  the answer by clicking. Same kbd vocabulary as the collapsed
+       *  state's ⌘K, so the two read as one system.
+       *
+       *  Only once there is something to submit; an empty field would be
+       *  offering a search that `run` refuses anyway. */}
+      {query.trim().length > 0 && !loading && (
+        <button
+          type="button"
+          // Keep focus in the input: a click that blurred the field would
+          // move focus to this button, which is exactly what stops the
+          // input's own Escape handler from working (see useDiagramSearch).
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onSubmit}
+          title="Search the diagram (Enter)"
+          aria-label="Search the diagram"
+          className="shrink-0 rounded border border-[#C9C8C3] bg-[#F2F1EF] px-1 font-sans text-[9.5px] leading-4 text-[#8A8880] transition-colors hover:border-[#2F7A6F] hover:bg-[#E6F0EE] hover:text-[#2F7A6F]"
         >
-          <kbd
-            className={`rounded border px-1 font-sans text-[10px] ${
-              query.trim()
-                ? "border-[#9CC6BE] bg-[#E7F2EF] text-[#2F7A6F]"
-                : "border-[#D9D7D2] bg-[#F4F3F1] text-[#A9A69E]"
-            }`}
-          >
-            ↵
-          </kbd>
-          more
-        </span>
+          ⏎
+        </button>
       )}
       <button
         type="button"

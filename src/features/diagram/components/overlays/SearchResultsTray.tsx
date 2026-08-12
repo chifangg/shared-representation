@@ -348,8 +348,21 @@ export function SearchResultsTray({
 
       {showLexical && (
         <div className="px-3 py-2">
-          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#A09C92]">
-            Name matches · press Enter to search properly
+          {/* Named back at the user, because the failure this fixes is
+           *  people reading the instant matches as the answer and never
+           *  submitting. A section heading reads as a label for the list
+           *  under it; quoting the question they typed reads as something
+           *  still waiting to happen. */}
+          <div className="mb-1.5 flex items-center gap-1.5 text-[10.5px] leading-4 text-[#8A8880]">
+            <span className="shrink-0 font-semibold uppercase tracking-wide text-[#A09C92]">
+              Name matches only
+            </span>
+            <kbd className="shrink-0 rounded border border-[#C9C8C3] bg-[#F2F1EF] px-1 font-sans text-[9.5px] text-[#8A8880]">
+              ⏎
+            </kbd>
+            <span className="min-w-0 truncate">
+              to answer “{state.query.trim()}”
+            </span>
           </div>
           {state.lexicalHits.map((h) => {
             const b = blocks.find((bl) => bl.id === h.blockId);
@@ -361,7 +374,10 @@ export function SearchResultsTray({
                 onClick={() => onSelectHit(h.blockId)}
                 className="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-black/[0.04]"
               >
-                <span className="truncate text-[12.5px] text-[#33322F]">
+                {/* Lighter than a tier-1 hit's label on purpose: this is a
+                 *  provisional list, and rendering it at full weight is
+                 *  what made it read as a finished result. */}
+                <span className="truncate text-[12.5px] text-[#6E6D68]">
                   {b.label}
                 </span>
                 <span className="ml-auto shrink-0 text-[10px] text-[#A09C92]">
@@ -455,8 +471,13 @@ export function SearchResultsTray({
       )}
 
       {nothingYet && (
-        <div className="px-3 py-2.5 text-[12px] text-[#8A8880]">
-          Describe what you are trying to understand, then press Enter.
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2.5 text-[12px] text-[#8A8880]">
+          <span>Describe what you are trying to understand, then press</span>
+          {/* Same key-cap as the field's submit button and the lexical
+           *  header, so Enter is shown the same way everywhere it matters. */}
+          <kbd className="rounded border border-[#C9C8C3] bg-[#F2F1EF] px-1 font-sans text-[9.5px] leading-4 text-[#8A8880]">
+            ⏎
+          </kbd>
         </div>
       )}
 
