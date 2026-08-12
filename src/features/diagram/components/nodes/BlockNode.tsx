@@ -52,6 +52,15 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
     setEditing(false);
   };
 
+  // Connection handles stay MOUNTED in read-only mode: programmatic edges
+  // anchor to them by id (sourceHandle="b" / targetHandle="t"), so removing
+  // them would strand every arrow on the canvas. They go inert instead:
+  // never revealed on hover, never a drag target, so there is no way to
+  // start the draw-an-arrow flow.
+  const handleReveal = data.readOnly
+    ? "pointer-events-none"
+    : "group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100";
+
   const ring = data.isPending
     ? "pending-block-pulse"
     : data.isEditing
@@ -182,7 +191,12 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
       {/* Drag grip (top-left) to pull this block into the chat as
        *  context. HTML5 draggable + `nodrag` so React Flow does not start
        *  a node-move; the chat panel's drop zone reads the payload. Only
-       *  visible on hover, so it does not affect the global layout. */}
+       *  visible on hover, so it does not affect the global layout.
+       *
+       *  Gone in read-only mode: the drop zone it targets is the chat
+       *  panel, which is not on screen, so the grip would be a drag with
+       *  nowhere to land. */}
+      {!data.readOnly && (
       <div
         {...dragSourceProps(
           blockContextItem({
@@ -200,6 +214,7 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
       >
         <Grip className="h-3 w-3" strokeWidth={2} />
       </div>
+      )}
       {/* Four connection handles, one per side. All declared as
        *  type="source" — combined with ConnectionMode.Loose on the
        *  parent ReactFlow, each handle can act as either source or
@@ -212,19 +227,19 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
         id="t"
         type="source"
         position={Position.Top}
-        className="!h-3 !w-3 !-translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className={`!h-3 !w-3 !-translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all ${handleReveal}`}
       />
       <Handle
         id="r"
         type="source"
         position={Position.Right}
-        className="!h-3 !w-3 !translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className={`!h-3 !w-3 !translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all ${handleReveal}`}
       />
       <Handle
         id="l"
         type="source"
         position={Position.Left}
-        className="!h-3 !w-3 !-translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className={`!h-3 !w-3 !-translate-x-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all ${handleReveal}`}
       />
       {editing ? (
         <input
@@ -291,7 +306,7 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
         id="b"
         type="source"
         position={Position.Bottom}
-        className="!h-3 !w-3 !translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all group-hover/block:!h-4 group-hover/block:!w-4 group-hover/block:!bg-[#78716C] group-hover/block:opacity-100"
+        className={`!h-3 !w-3 !translate-y-1/2 !border-2 !border-white !bg-[#999999] opacity-0 transition-all ${handleReveal}`}
       />
     </div>
   );

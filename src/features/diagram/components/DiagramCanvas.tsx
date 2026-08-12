@@ -30,6 +30,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useProject } from "@/core/project";
 import { useChatActivity } from "@/core/chatActivity";
+import { useReadOnly } from "@/core/readOnly";
 import { logEvent } from "@/core/interactionLog";
 import { DiagramActionEntry } from "./overlays/DiagramActionEntry";
 import { DiagramSearchNudge } from "./overlays/DiagramSearchNudge";
@@ -143,6 +144,10 @@ function DiagramCanvasInner({
   const { files, chatMessages, chatRunning, projectKey, setDiagramBusy } =
     useProject();
   const bus = useDiagramBus();
+  // Read-only closes every route from this canvas into a code edit. It does
+  // NOT touch anything that only reads: selection, camera, drill-in
+  // bubbles, the connection lens, and both search modes all stay.
+  const readOnly = useReadOnly();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [promoted, setPromoted] = useState<{
@@ -154,6 +159,12 @@ function DiagramCanvasInner({
   // appearance card). State, click-routing, and reset live in the hook;
   // this component only owns the code-write dispatch on confirm.
   const bubbleEdit = useBubbleEditOverlays(projectKey);
+  // A card open when read-only is switched ON loses its renderer but keeps
+  // its state, and would pop back on the way out. Close it with the mode.
+  const closeBubbleDetail = bubbleEdit.closeDetail;
+  useEffect(() => {
+    if (readOnly) closeBubbleDetail();
+  }, [readOnly, closeBubbleDetail]);
   // Snapshot of the schema captured just before each auto-regen so
   // useRecentChanges can diff and glow whatever Claude added.
   const preRegenSnapshotRef = useRef<PreRegenSnapshot | null>(null);
@@ -963,6 +974,7 @@ function DiagramCanvasInner({
     editRegenIds,
     handleRenameBlock: visualEdit.handleRenameBlock,
     handleBlockAction: visualEdit.handleBlockAction,
+    readOnly,
     userPositionsRef,
   });
 
@@ -1025,7 +1037,7 @@ function DiagramCanvasInner({
             edges={renderedEdges}
             onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
-            onConnect={visualEdit.handleAddConnection}
+            onConnect={readOnly ? undefined : visualEdit.handleAddConnection}
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
@@ -1036,7 +1048,7 @@ function DiagramCanvasInner({
             minZoom={0.3}
             maxZoom={2}
             nodesDraggable
-            nodesConnectable={state.kind === "ready"}
+            nodesConnectable={state.kind === "ready" && !readOnly}
             connectionMode={ConnectionMode.Loose}
             nodesFocusable={false}
             elementsSelectable={false}
@@ -1105,7 +1117,11 @@ function DiagramCanvasInner({
         {/* Adaptive-focus welcome / loading / streaming count all live INSIDE
          *  the side panel (DiagramFocusPanel), which is open for the whole of
          *  focus mode, so nothing floats over the canvas during a focus round. */}
-        {visualEdit.pendingOptions && state.kind === "ready" && (
+        {/* Every edit overlay is gated on read-only as well as on its own
+         *  trigger. Nothing can open them once the affordances are gone, so
+         *  this is belt and braces, but it also covers the case of turning
+         *  read-only ON while one of them is already on screen. */}
+        {!readOnly && visualEdit.pendingOptions && state.kind === "ready" && (
           <ConnectionOptionsOverlay
             target={visualEdit.pendingOptions.target}
             options={visualEdit.pendingOptions.options}
@@ -1114,7 +1130,7 @@ function DiagramCanvasInner({
             onCancel={visualEdit.handleCancelOptions}
           />
         )}
-        {visualEdit.intentGate && state.kind === "ready" && (
+        {!readOnly && visualEdit.intentGate && state.kind === "ready" && (
           <IntentGate
             key={
               visualEdit.intentGate.target.kind === "arrow"
@@ -1159,6 +1175,7 @@ function DiagramCanvasInner({
               <DiagramSearchBox
                 open={search.state.open}
                 mode={search.state.mode}
+                agentDisabled={readOnly}
                 query={search.state.query}
                 loading={search.state.status === "loading"}
                 inputRef={searchInputRef}
@@ -1257,7 +1274,9 @@ function DiagramCanvasInner({
             genError={color.genError}
             onClearGenError={color.clearGenError}
             topAccessory={
-              !visualEdit.pendingOptions && !visualEdit.intentGate ? (
+              !readOnly &&
+              !visualEdit.pendingOptions &&
+              !visualEdit.intentGate ? (
                 <button
                   type="button"
                   onClick={visualEdit.handleAddNewBlock}
@@ -1271,7 +1290,12 @@ function DiagramCanvasInner({
             }
           />
         )}
-        {state.kind === "ready" && (
+        {/* The bubble drill-in card is a mixed surface: it explains a
+         *  capability from source AND takes an instruction that rewrites it.
+         *  Read-only drops the whole card rather than half of it, because
+         *  the reading half is already available without an edit path, in
+         *  the search tray's "Explain from the code" drill-in. */}
+        {!readOnly && state.kind === "ready" && (
           <BubbleEditOverlays
             blocks={state.schema.blocks}
             files={files}

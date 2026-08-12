@@ -46,6 +46,7 @@ const MODES: {
 export function DiagramSearchBox({
   open,
   mode,
+  agentDisabled,
   query,
   loading,
   inputRef,
@@ -57,6 +58,8 @@ export function DiagramSearchBox({
 }: {
   open: boolean;
   mode: SearchMode;
+  /** Read-only mode: the agent segment is shown but cannot be selected. */
+  agentDisabled: boolean;
   query: string;
   loading: boolean;
   /** So the tray can anchor under the field, and Cmd+K can focus it. */
@@ -114,21 +117,33 @@ export function DiagramSearchBox({
       >
         {MODES.map((m) => {
           const active = mode === m.value;
+          // Agent stays VISIBLE but disabled in read-only rather than being
+          // removed. A segment that vanishes leaves the user wondering
+          // whether the feature broke; a dimmed one with a reason in its
+          // tooltip says the mode exists and what turns it back on.
+          const off = agentDisabled && m.value === "agent";
           return (
             <button
               key={m.value}
               type="button"
               role="radio"
               aria-checked={active}
+              disabled={off}
               // Never steal focus from the input: switching modes mid-typing
               // has to leave the caret where it was.
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onModeChange(m.value)}
-              title={m.title}
+              title={
+                off
+                  ? "Not available in read-only mode: no agent runs. Name matching still works."
+                  : m.title
+              }
               className={`flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium transition-colors ${
-                active
-                  ? "bg-white text-[#2F7A6F] shadow-[0_1px_2px_rgba(51,50,47,0.12)]"
-                  : "text-[#8A8880] hover:text-[#33322F]"
+                off
+                  ? "cursor-not-allowed text-[#C4C2BC]"
+                  : active
+                    ? "bg-white text-[#2F7A6F] shadow-[0_1px_2px_rgba(51,50,47,0.12)]"
+                    : "text-[#8A8880] hover:text-[#33322F]"
               }`}
             >
               <m.icon className="h-3 w-3 shrink-0" strokeWidth={2.2} />

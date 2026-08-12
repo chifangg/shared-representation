@@ -271,6 +271,10 @@ export type BlockNodeData = {
   /** Open the block-level action menu (cards overlay) for this block.
    *  Wired on the canvas via attachInteractive. */
   onActions?: () => void;
+  /** Read-only mode. The edit handlers above are already absent then;
+   *  this exists for the affordances that are not handler-gated, i.e.
+   *  the drag-into-chat grip, which has no chat to be dropped into. */
+  readOnly?: boolean;
 };
 
 export type BubbleNodeData = {

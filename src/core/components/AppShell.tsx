@@ -4,9 +4,17 @@ import {
   Panel,
   Separator,
   type GroupImperativeHandle,
+  type PanelImperativeHandle,
 } from "react-resizable-panels";
-import { PanelLeftClose, PanelLeftOpen, FolderTree } from "lucide-react";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  FolderTree,
+  BookOpen,
+  Pencil,
+} from "lucide-react";
 import { logEvent } from "@/core/interactionLog";
+import { useReadOnly, useReadOnlyToggle } from "@/core/readOnly";
 import { ChatView } from "@/core/components/ChatView";
 import {
   CodeTabs,
@@ -41,6 +49,8 @@ import { hasSyncHandle } from "@/core/folderSync";
  */
 export function AppShell() {
   const groupRef = useRef<GroupImperativeHandle | null>(null);
+  const chatPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const readOnly = useReadOnly();
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [animating, setAnimating] = useState(false);
   // Mirrors whether the code column currently exists. Set ONLY on the
@@ -60,6 +70,19 @@ export function AppShell() {
     setAnimating(true);
     window.setTimeout(() => setAnimating(false), 320);
   }, []);
+
+  // Read-only hides chat by COLLAPSING its panel, never by unmounting it:
+  // see the layout note above, where mounting/unmounting a Panel is cause
+  // number one of the separator lag. Collapsed it is still registered with
+  // the group, so sizes stay normalised and expanding restores the width
+  // the user had set. The separator and the panel are disabled alongside,
+  // or the 4px handle would still drag chat back into view.
+  useEffect(() => {
+    const panel = chatPanelRef.current;
+    if (!panel) return;
+    if (readOnly) panel.collapse();
+    else panel.expand();
+  }, [readOnly]);
 
   const railW = filesExpanded ? RAIL_W_OPEN : RAIL_W;
   const codeW = codeOpen ? CODE_W : 0;
@@ -134,9 +157,17 @@ export function AppShell() {
               <Panel id="diagram" defaultSize={62} minSize={30}>
                 <DiagramPanel />
               </Panel>
-              <ResizeHandle />
+              <ResizeHandle disabled={readOnly} />
 
-              <Panel id="chat" defaultSize={38} minSize={14}>
+              <Panel
+                id="chat"
+                defaultSize={38}
+                minSize={14}
+                collapsible
+                collapsedSize={0}
+                disabled={readOnly}
+                panelRef={chatPanelRef}
+              >
                 <ChatView />
               </Panel>
             </Group>
@@ -228,6 +259,51 @@ function FilesRail({
           </button>
         )}
       </div>
+
+      <ReadOnlyToggle expanded={expanded} />
+    </div>
+  );
+}
+
+/**
+ * The read-only switch, in the bottom-left corner.
+ *
+ * It lives at the foot of the files rail rather than floating over the
+ * canvas: the rail already owns the left edge for its full height, so this
+ * is the corner without a new floating layer to keep out of the diagram's
+ * way. It is a mode switch, not an action, so it stays lit while the mode
+ * is on rather than reverting to a neutral look after the click.
+ */
+function ReadOnlyToggle({ expanded }: { expanded: boolean }) {
+  const readOnly = useReadOnly();
+  const toggle = useReadOnlyToggle();
+  const Icon = readOnly ? BookOpen : Pencil;
+  return (
+    <div className="shrink-0 border-t border-[#C9C8C3] p-2">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={readOnly}
+        title={
+          readOnly
+            ? "Read-only: chat is hidden and the diagram cannot edit code. Click to allow editing."
+            : "Editing enabled. Click for read-only: hides chat and every edit route through the diagram."
+        }
+        className={`flex h-9 w-full items-center rounded-md transition-colors ${
+          expanded ? "gap-2 px-2" : "justify-center"
+        } ${
+          readOnly
+            ? "bg-[#E2F0ED] text-[#256B60] hover:bg-[#D3E8E3]"
+            : "text-[#6E6D68] hover:bg-black/[0.06] hover:text-[#33322F]"
+        }`}
+      >
+        <Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
+        {expanded && (
+          <span className="truncate text-[12px] font-medium">
+            {readOnly ? "Read-only" : "Editing"}
+          </span>
+        )}
+      </button>
     </div>
   );
 }
@@ -276,9 +352,18 @@ function CodeColumnAutoSize({
  * colour: growing the separator itself on hover would relayout the whole group
  * every time the pointer crossed it.
  */
-function ResizeHandle() {
+function ResizeHandle({ disabled = false }: { disabled?: boolean }) {
   return (
-    <Separator className="relative w-1 bg-transparent before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-[#DEDCD7] before:transition-colors before:content-[''] hover:before:bg-[#B9B7B1]" />
+    <Separator
+      disabled={disabled}
+      // Invisible when there is nothing on the other side of it: a hairline
+      // against the window edge reads as a panel that failed to load.
+      className={`relative w-1 bg-transparent before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:transition-colors before:content-[''] ${
+        disabled
+          ? "before:bg-transparent"
+          : "before:bg-[#DEDCD7] hover:before:bg-[#B9B7B1]"
+      }`}
+    />
   );
 }
 

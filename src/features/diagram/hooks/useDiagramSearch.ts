@@ -13,11 +13,13 @@
  * holds for `ask` too, the one entry point a caller outside the box can
  * use (the chat nudge): it opens the box and runs a query, nothing more.
  *
- * Two tiers feed one result surface:
- *   - tier 0 (`lexicalHits`) is recomputed synchronously on every
- *     keystroke, so the tray is never empty while the network is in
- *     flight.
- *   - tier 1 (`result`) replaces it when the semantic answer lands.
+ * Two modes, one result surface (see SearchMode):
+ *   - "name" (`lexicalHits`) is recomputed synchronously on every
+ *     keystroke, with no network.
+ *   - "agent" (`result`) is the semantic pass, and runs only on submit.
+ *
+ * Read-only mode pins this to "name" and refuses every route into the
+ * agent pass, including a request already in flight.
  *
  * Regen policy: when the schema changes under a live result, hits are
  * re-resolved BY LABEL and misses are dropped, rather than clearing.
@@ -27,6 +29,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logEvent } from "@/core/interactionLog";
+import { useReadOnly } from "@/core/readOnly";
 import type { DiagramSchema } from "../types";
 import { lexicalSearch, type LexicalHit } from "../util/lexicalSearch";
 import {
@@ -106,8 +109,17 @@ export function useDiagramSearch({
   enabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [mode, setModeState] = useState<SearchMode>(DEFAULT_MODE);
+  const [chosenMode, setChosenMode] = useState<SearchMode>(DEFAULT_MODE);
   const [query, setQuery] = useState("");
+
+  // Read-only pins the box to name matching. The agent pass is a model
+  // call that reads the user's source, which is a different thing from
+  // "cannot edit", but read-only is the mode people pick when they want
+  // the app to do nothing on its own, so the honest reading of it is that
+  // no agent runs. The choice is remembered, not overwritten: leaving
+  // read-only puts the box back in whichever mode it was in.
+  const readOnly = useReadOnly();
+  const mode: SearchMode = readOnly ? "name" : chosenMode;
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DiagramSearchResult | null>(null);
@@ -147,7 +159,7 @@ export function useDiagramSearch({
 
   const close = useCallback(() => {
     setOpen(false);
-    setModeState(DEFAULT_MODE);
+    setChosenMode(DEFAULT_MODE);
     clear();
     logEvent("diagram-search-close", {});
   }, [clear]);
@@ -164,7 +176,10 @@ export function useDiagramSearch({
    */
   const setMode = useCallback(
     (next: SearchMode) => {
-      setModeState((prev) => {
+      // Agent mode is not selectable in read-only. The UI disables the
+      // segment; this makes the rule hold whoever calls.
+      if (readOnly && next === "agent") return;
+      setChosenMode((prev) => {
         if (prev === next) return prev;
         if (next === "name") {
           inflight.current?.abort();
@@ -176,7 +191,7 @@ export function useDiagramSearch({
         return next;
       });
     },
-    [],
+    [readOnly],
   );
 
   const openBox = useCallback(
@@ -222,6 +237,8 @@ export function useDiagramSearch({
    *  Enter cannot stack requests. */
   const run = useCallback(
     (raw?: string) => {
+    // No agent call in read-only, whatever route got here.
+    if (readOnly) return;
     const q = (raw ?? query).trim();
     if (q.length === 0 || schema.blocks.length === 0) return;
 
@@ -297,7 +314,7 @@ export function useDiagramSearch({
         });
       });
     },
-    [query, schema, lexicalHits.length],
+    [readOnly, query, schema, lexicalHits.length],
   );
 
   /** Enter in the search box. Only agent mode has anything to submit:
@@ -318,16 +335,19 @@ export function useDiagramSearch({
    */
   const ask = useCallback(
     (q: string) => {
-      if (!enabled) return;
+      // Read-only has no agent mode, so an ask has nowhere to land. The
+      // nudge that fires this lives in the chat panel, which is hidden
+      // then, so in practice this is the belt to that braces.
+      if (!enabled || readOnly) return;
       setOpen(true);
       // The nudge asks a question, not for a name, so it forces the mode
       // rather than firing into whichever one the box was left in.
-      setModeState("agent");
+      setChosenMode("agent");
       setQuery(q);
       run(q);
       logEvent("diagram-search-ask", { query: q });
     },
-    [enabled, run],
+    [enabled, readOnly, run],
   );
 
   /**
@@ -458,7 +478,7 @@ export function useDiagramSearch({
     inflight.current?.abort();
     inflight.current = null;
     setOpen(false);
-    setModeState(DEFAULT_MODE);
+    setChosenMode(DEFAULT_MODE);
     setQuery("");
     setStatus("idle");
     setError(null);
@@ -467,6 +487,16 @@ export function useDiagramSearch({
     setStale(false);
     setHistory([]);
   }, [projectKey]);
+
+  // Entering read-only mid-flight kills the request. The mode's promise is
+  // that no agent runs, and an answer landing seconds later would break it.
+  useEffect(() => {
+    if (!readOnly) return;
+    inflight.current?.abort();
+    inflight.current = null;
+    setStatus("idle");
+    setError(null);
+  }, [readOnly]);
 
   useEffect(() => () => inflight.current?.abort(), []);
 

@@ -2,6 +2,7 @@ import { AppShell } from "@/core/components/AppShell";
 import { ProjectProvider } from "@/core/project";
 import { ChatContextDragProvider } from "@/core/chatContextDrag";
 import { ChatActivityProvider } from "@/core/chatActivity";
+import { ReadOnlyProvider } from "@/core/readOnly";
 import { DiagramBusProvider } from "@/features/diagram/protocol/bus";
 
 /**
@@ -26,13 +27,15 @@ import { DiagramBusProvider } from "@/features/diagram/protocol/bus";
 export default function App() {
   return (
     <ProjectProvider>
-      <DiagramBusProvider>
-        <ChatActivityProvider>
-          <ChatContextDragProvider>
-            <AppShell />
-          </ChatContextDragProvider>
-        </ChatActivityProvider>
-      </DiagramBusProvider>
+      <ReadOnlyProvider>
+        <DiagramBusProvider>
+          <ChatActivityProvider>
+            <ChatContextDragProvider>
+              <AppShell />
+            </ChatContextDragProvider>
+          </ChatActivityProvider>
+        </DiagramBusProvider>
+      </ReadOnlyProvider>
     </ProjectProvider>
   );
 }

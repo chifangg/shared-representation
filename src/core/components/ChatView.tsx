@@ -13,6 +13,7 @@ import {
 } from "@/core/chatContext";
 import { useChatContextDropZone } from "@/core/chatContextDrag";
 import { useChatActivity } from "@/core/chatActivity";
+import { useReadOnly } from "@/core/readOnly";
 import { getStudyMode } from "@/core/studyMode";
 import { logEvent, setLogContext } from "@/core/interactionLog";
 import { ThinkingBubble } from "@/core/components/ThinkingBubble";
@@ -58,6 +59,7 @@ export function ChatView({ model }: { model?: string }) {
   const { files, setChatMessages, setChatRunning, projectKey, diagramBusy } =
     useProject();
   const { entries: activityEntries, clear: clearActivity } = useChatActivity();
+  const readOnly = useReadOnly();
   const running = session.status === "running";
 
   const hasFiles = files.length > 0;
@@ -293,11 +295,19 @@ export function ChatView({ model }: { model?: string }) {
        *  header as the other panels, no session-id debug line. */}
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-[#C9C8C3] bg-[#DCDBD6] px-3 text-sm font-medium text-[#33322F]">
         <span>Chat</span>
+        {/* Also gated by read-only. It starts no edit itself, but it throws
+         *  the transcript away, and the transcript is the one thing
+         *  read-only is meant to leave you with. */}
         <button
           onClick={handleNewChat}
-          title="New chat"
+          disabled={readOnly}
+          title={readOnly ? "Not available in read-only mode" : "New chat"}
           aria-label="New chat"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[#8C8B87] transition-colors hover:bg-black/[0.06] hover:text-[#2C2B28]"
+          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+            readOnly
+              ? "cursor-not-allowed text-[#C4C2BC]"
+              : "text-[#8C8B87] hover:bg-black/[0.06] hover:text-[#2C2B28]"
+          }`}
         >
           <SquarePen className="h-4 w-4" strokeWidth={2} />
         </button>
@@ -369,12 +379,19 @@ export function ChatView({ model }: { model?: string }) {
           logEvent("chat-cancel");
           session.cancel();
         }}
-        disabled={running || !hasFiles || diagramBusy}
+        // Read-only gates the composer but NOT the transcript above it. In
+        // the tool condition this panel is collapsed anyway, so the case
+        // that matters is baseline, where chat is the whole app: the past
+        // conversation stays readable and scrollable, and only sending a
+        // new prompt is closed off.
+        disabled={readOnly || running || !hasFiles || diagramBusy}
         running={running}
         placeholder={
-          diagramBusy
-            ? "Diagram is being drawn, chat opens when it settles…"
-            : undefined
+          readOnly
+            ? "Read-only mode. You can read the conversation, but not send new prompts."
+            : diagramBusy
+              ? "Diagram is being drawn, chat opens when it settles…"
+              : undefined
         }
         attachments={
           contextItems.length > 0 ? (

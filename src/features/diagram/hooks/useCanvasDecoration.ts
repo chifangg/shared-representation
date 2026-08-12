@@ -52,6 +52,7 @@ export function useCanvasDecoration({
   editRegenIds,
   handleRenameBlock,
   handleBlockAction,
+  readOnly,
   userPositionsRef,
 }: {
   state: FetchState;
@@ -66,6 +67,8 @@ export function useCanvasDecoration({
   editRegenIds: Set<string>;
   handleRenameBlock: (blockId: string, newLabel: string) => void;
   handleBlockAction: (blockId: string) => void;
+  /** Read-only mode: strip every edit handler off the nodes. */
+  readOnly: boolean;
   /** Positions the user has dragged blocks to, keyed by block id. Used
    *  to override the freshly computed dagre slot so a manual move
    *  survives a relayout. Owned by the canvas (also written by the
@@ -100,10 +103,17 @@ export function useCanvasDecoration({
               recentChanges?.blockIds.has(n.id) ?? false,
             isEditing:
               editingBlockIds.has(n.id) || editRegenIds.has(n.id),
-            onLabelChange: promotedIds.has(n.id)
-              ? undefined
-              : (newLabel: string) => handleRenameBlock(n.id, newLabel),
-            onActions: () => handleBlockAction(n.id),
+            // Read-only nulls both, which is the whole affordance: BlockNode
+            // gates its rename and its actions button on the handler being
+            // there, so omitting them removes the controls rather than
+            // leaving dead ones to click. Same mechanism promoted blocks
+            // already use for rename.
+            onLabelChange:
+              readOnly || promotedIds.has(n.id)
+                ? undefined
+                : (newLabel: string) => handleRenameBlock(n.id, newLabel),
+            onActions: readOnly ? undefined : () => handleBlockAction(n.id),
+            readOnly,
           },
         };
       });
@@ -121,6 +131,7 @@ export function useCanvasDecoration({
     [
       handleRenameBlock,
       handleBlockAction,
+      readOnly,
       recentChanges,
       editingBlockIds,
       editRegenIds,
