@@ -61,6 +61,10 @@ pub(super) async fn execute_claude_command(
     // Create Claude command
     println!("[TRACE] Creating Claude command...");
     let mut cmd = Command::new(&claude_path);
+    // The backend holds ANTHROPIC_API_KEY for the diagram endpoints only.
+    // The chat CLI must run on the user's claude.ai subscription, so the
+    // key must not leak into the child process.
+    cmd.env_remove("ANTHROPIC_API_KEY");
     let mut args: Vec<String> = vec![
         "-p".into(),
         prompt.clone(),

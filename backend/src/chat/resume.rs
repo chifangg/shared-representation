@@ -40,6 +40,8 @@ pub(super) async fn resume_claude_command(
         find_claude_binary_web().map_err(|e| format!("Claude binary not found: {}", e))?;
 
     let mut cmd = Command::new(&claude_path);
+    // Diagram-only key must not leak into the chat CLI (subscription auth).
+    cmd.env_remove("ANTHROPIC_API_KEY");
     let mut args: Vec<String> = vec![
         "--resume".into(),
         claude_session_id.clone(),

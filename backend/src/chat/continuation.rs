@@ -42,6 +42,8 @@ pub(super) async fn continue_claude_command(
 
     // Create continue command
     let mut cmd = Command::new(&claude_path);
+    // Diagram-only key must not leak into the chat CLI (subscription auth).
+    cmd.env_remove("ANTHROPIC_API_KEY");
     let mut args: Vec<String> = vec![
         "-c".into(), // Continue flag
         "-p".into(),

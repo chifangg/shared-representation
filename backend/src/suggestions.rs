@@ -56,6 +56,7 @@ no prose, no explanation:\n\
     let output_future = async {
         use tokio::io::AsyncWriteExt;
         let mut child = tokio::process::Command::new(&claude_path)
+            .env_remove("ANTHROPIC_API_KEY")
             .arg("-p")
             .arg("--model")
             .arg("sonnet")
