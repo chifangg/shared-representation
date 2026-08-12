@@ -33,12 +33,22 @@ function FunctionBubbleImpl({ data }: NodeProps & { data: BubbleNodeData }) {
       {...dragSourceProps(
         capabilityContextItem(data.displayLabel, data.parentBlockLabel),
       )}
-      className={`nodrag nopan flex cursor-grab items-center justify-center rounded-full border border-[#E8DDC4] bg-[#F5EFE0] text-center shadow-sm transition-colors hover:border-[#C9B58E] hover:bg-[#EFE5D0] active:cursor-grabbing ${
+      className={`nodrag nopan relative flex cursor-grab items-center justify-center rounded-full border border-[#E8DDC4] bg-[#F5EFE0] text-center shadow-sm transition-colors hover:border-[#C9B58E] hover:bg-[#EFE5D0] active:cursor-grabbing ${
         data.isExiting ? "bubble-exit" : "bubble-enter"
       }`}
       style={animStyle}
       title={`${data.label}  (drag into chat as context)`}
     >
+      {/* Reading-order badge: the fan reads as a sequence (1..N) in the
+       *  same order the capabilities were generated, matching the
+       *  diagram's top-down flow. Sits just outside the top-left rim so
+       *  it annotates the bubble without covering its label. */}
+      <span
+        title={`Step ${data.order} of ${data.total}`}
+        className="absolute -left-1 -top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[#B0975A] text-[10.5px] font-semibold text-white shadow-[0_1px_2px_rgba(51,50,47,0.3)]"
+      >
+        {data.order}
+      </span>
       <span className="line-clamp-4 break-words px-2 text-[10px] font-medium leading-[1.2] text-[#5C5040]">
         {data.displayLabel}
       </span>

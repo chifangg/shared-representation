@@ -248,6 +248,8 @@ export function buildBubbleAndSectorNodes(args: {
         displayLabel: item.display,
         parentBlockId: activeBlockId,
         parentBlockLabel: block.label,
+        order: i + 1,
+        total: items.length,
         isExiting,
         enterDx: cx - bubbleCenterX,
         enterDy: cy - bubbleCenterY,

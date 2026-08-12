@@ -101,10 +101,27 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
           borderColor: "#D2CABB",
         }
       : undefined;
+  // Files + features, shown as a hover tooltip on the WHOLE card. It used
+  // to sit only on the small "N features" line, which a pilot found too
+  // hard to hit; hovering anywhere on the block now surfaces it (the
+  // label keeps its own rename hint, which wins over this one there).
+  const provenanceTitle = [
+    fileCount > 0 ? `Files:\n${data.files.join("\n")}` : "",
+    capCount > 0
+      ? `Features:\n${(data.capabilities ?? []).join("\n")}`
+      : fnCount > 0
+        ? `Functions:\n${data.functions.slice(0, 12).join(", ")}${
+            fnCount > 12 ? ` (+${fnCount - 12} more)` : ""
+          }`
+        : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   return (
     <div
       className={`block-node-grow group/block relative rounded-[5px] border bg-white px-3 py-2 transition-all ${borderColor} ${ring} ${dim}`}
       style={{ width: NODE_W, minHeight: NODE_H, ...catStyle }}
+      title={provenanceTitle || undefined}
     >
       {/* Reading-order badge while a search result is live. Sits outside
        *  the top-left corner so it reads as an annotation ON the block
@@ -255,25 +272,7 @@ export function BlockNode({ data, selected }: NodeProps<Node<BlockNodeData>>) {
         </div>
       )}
       {(fileCount > 0 || drillCount > 0) && (
-        <div
-          className="mt-1.5 text-[10px] uppercase tracking-wide text-[#999999]"
-          // Hover-tooltip lists actual file names + the capabilities (or,
-          // for older schemas, the functions). The in-block expanded lists
-          // were dropped: they crowded the node and were hard to read at
-          // this scale; the hover gives the same info on demand.
-          title={[
-            fileCount > 0 ? `Files:\n${data.files.join("\n")}` : "",
-            capCount > 0
-              ? `Features:\n${(data.capabilities ?? []).join("\n")}`
-              : fnCount > 0
-                ? `Functions:\n${data.functions.slice(0, 12).join(", ")}${
-                    fnCount > 12 ? ` (+${fnCount - 12} more)` : ""
-                  }`
-                : "",
-          ]
-            .filter(Boolean)
-            .join("\n\n")}
-        >
+        <div className="mt-1.5 text-[10px] uppercase tracking-wide text-[#999999]">
           {drillCount > 0 && (
             <>
               {drillCount}{" "}

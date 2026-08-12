@@ -288,6 +288,13 @@ export type BubbleNodeData = {
   /** Label of the parent block, so dragging the bubble into chat can say
    *  "capability X in block Y". */
   parentBlockLabel: string;
+  /** 1-based reading order within the fan, in the same emission order the
+   *  capabilities carry from the generator. Shown as a small badge so a
+   *  fan reads as a sequence, matching the diagram's top-down flow. */
+  order: number;
+  /** How many bubbles are in this fan, so a bubble can render "n of N"
+   *  affordances if needed. */
+  total: number;
   /** True while the cluster is animating OUT (user just collapsed it
    *  but bubbles are still in the DOM playing the exit animation). The
    *  bubble component branches its CSS animation class on this. */
