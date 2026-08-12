@@ -42,6 +42,25 @@ import {
 
 export type SearchStatus = "idle" | "loading" | "ready" | "error";
 
+/**
+ * Which search the box is doing. The two used to be one escalating flow
+ * (type for names, press Enter for the agent), which hid the second half:
+ * the instant matches satisfied people and they never submitted. Making
+ * it a mode says up front which question is being answered and what it
+ * costs, and it makes the cheap local search a destination in its own
+ * right rather than a waiting room.
+ *
+ *   - "name"  — local substring match over the schema. Live, free.
+ *   - "agent" — the semantic pass. Costs a model call, returns an answer
+ *               and an ordered reading path, and only runs on submit.
+ */
+export type SearchMode = "name" | "agent";
+
+/** Agent mode is the default: the ordered reading path is the reason this
+ *  box exists, and name matching is the fallback people reach for once
+ *  they know what a block is called. */
+const DEFAULT_MODE: SearchMode = "agent";
+
 /** A tier-1 hit resolved against the CURRENT schema. `label` is captured at
  *  fetch time and is what re-resolution matches on after a regen. */
 export type ResolvedHit = {
@@ -53,6 +72,8 @@ export type ResolvedHit = {
 
 export type SearchState = {
   open: boolean;
+  /** Which of the two searches the box is currently doing. */
+  mode: SearchMode;
   query: string;
   status: SearchStatus;
   error: string | null;
@@ -85,6 +106,7 @@ export function useDiagramSearch({
   enabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [mode, setModeState] = useState<SearchMode>(DEFAULT_MODE);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +124,14 @@ export function useDiagramSearch({
   const inflight = useRef<AbortController | null>(null);
   const startedAt = useRef<number>(0);
 
-  // Tier 0: synchronous, every keystroke, no network.
+  // Name mode: synchronous, every keystroke, no network. Not computed in
+  // agent mode at all now that it is a mode rather than a warm-up layer.
   const lexicalHits = useMemo(
-    () => (query.trim().length === 0 ? [] : lexicalSearch(schema.blocks, query)),
-    [schema.blocks, query],
+    () =>
+      mode !== "name" || query.trim().length === 0
+        ? []
+        : lexicalSearch(schema.blocks, query),
+    [mode, schema.blocks, query],
   );
 
   const clear = useCallback(() => {
@@ -121,9 +147,37 @@ export function useDiagramSearch({
 
   const close = useCallback(() => {
     setOpen(false);
+    setModeState(DEFAULT_MODE);
     clear();
     logEvent("diagram-search-close", {});
   }, [clear]);
+
+  /**
+   * Switch which search the box is doing.
+   *
+   * The query survives the switch: the same words are a reasonable input
+   * to both searches, and retyping them would be the main cost of having
+   * two modes at all. An in-flight agent call does not survive, because
+   * flipping to name mode is a statement that its answer is no longer
+   * wanted, and letting it land would repopulate a tray the user just
+   * asked to show something else.
+   */
+  const setMode = useCallback(
+    (next: SearchMode) => {
+      setModeState((prev) => {
+        if (prev === next) return prev;
+        if (next === "name") {
+          inflight.current?.abort();
+          inflight.current = null;
+          setStatus("idle");
+          setError(null);
+        }
+        logEvent("diagram-search-mode", { mode: next });
+        return next;
+      });
+    },
+    [],
+  );
 
   const openBox = useCallback(
     (via: "header" | "shortcut") => {
@@ -246,8 +300,12 @@ export function useDiagramSearch({
     [query, schema, lexicalHits.length],
   );
 
-  /** Enter in the search box: run whatever is currently typed. */
-  const submit = useCallback(() => run(), [run]);
+  /** Enter in the search box. Only agent mode has anything to submit:
+   *  name matching is already live on every keystroke. */
+  const submit = useCallback(() => {
+    if (mode !== "agent") return;
+    run();
+  }, [mode, run]);
 
   /**
    * Fire a search the user did not type: open the box, show the question,
@@ -262,6 +320,9 @@ export function useDiagramSearch({
     (q: string) => {
       if (!enabled) return;
       setOpen(true);
+      // The nudge asks a question, not for a name, so it forces the mode
+      // rather than firing into whichever one the box was left in.
+      setModeState("agent");
       setQuery(q);
       run(q);
       logEvent("diagram-search-ask", { query: q });
@@ -397,6 +458,7 @@ export function useDiagramSearch({
     inflight.current?.abort();
     inflight.current = null;
     setOpen(false);
+    setModeState(DEFAULT_MODE);
     setQuery("");
     setStatus("idle");
     setError(null);
@@ -420,25 +482,34 @@ export function useDiagramSearch({
       .filter((h): h is ResolvedHit => h !== null);
   }, [result, schema.blocks]);
 
+  // Rings on the canvas follow the active mode, not whichever list happens
+  // to be non-empty: a stale agent result must not keep blocks lit while
+  // name mode is showing a different set.
   const highlightIds = useMemo(
     () =>
-      hits.length > 0
+      mode === "agent"
         ? hits.map((h) => h.blockId)
         : lexicalHits.map((h) => h.blockId),
-    [hits, lexicalHits],
+    [mode, hits, lexicalHits],
   );
 
+  // Each mode publishes only its own result. The agent's answer is kept in
+  // state across a switch (flipping to names and back should not cost
+  // another call) but it is not rendered while name mode is showing, so
+  // the tray can never mix the two.
+  const agentMode = mode === "agent";
   const state: SearchState = {
     open,
+    mode,
     query,
     status,
     error,
-    lexicalHits: hits.length > 0 ? [] : lexicalHits,
-    hits,
-    path: result?.path ?? [],
-    answer: result?.answer ?? "",
-    missing: result?.missing ?? false,
-    stale,
+    lexicalHits,
+    hits: agentMode ? hits : [],
+    path: agentMode ? result?.path ?? [] : [],
+    answer: agentMode ? result?.answer ?? "" : "",
+    missing: agentMode ? result?.missing ?? false : false,
+    stale: agentMode && stale,
     highlightIds,
     history,
   };
@@ -446,6 +517,7 @@ export function useDiagramSearch({
   return {
     state,
     setQuery,
+    setMode,
     submit,
     ask,
     openBox,

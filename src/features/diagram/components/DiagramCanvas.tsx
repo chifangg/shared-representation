@@ -1158,10 +1158,12 @@ function DiagramCanvasInner({
             <div ref={searchAnchorRef}>
               <DiagramSearchBox
                 open={search.state.open}
+                mode={search.state.mode}
                 query={search.state.query}
                 loading={search.state.status === "loading"}
                 inputRef={searchInputRef}
                 onOpen={() => search.openBox("header")}
+                onModeChange={search.setMode}
                 onQueryChange={search.setQuery}
                 onSubmit={search.submit}
                 onClose={search.close}

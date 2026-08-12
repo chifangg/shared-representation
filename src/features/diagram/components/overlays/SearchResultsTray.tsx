@@ -258,8 +258,11 @@ export function SearchResultsTray({
 
   if (!pos) return null;
 
+  // The hook already publishes only the active mode's result, so these
+  // stay simple: whichever list is non-empty belongs to the mode showing.
+  const nameMode = state.mode === "name";
   const hasTier1 = state.hits.length > 0;
-  const showLexical = !hasTier1 && state.lexicalHits.length > 0;
+  const showLexical = state.lexicalHits.length > 0;
   const idle =
     !hasTier1 &&
     !showLexical &&
@@ -267,10 +270,14 @@ export function SearchResultsTray({
     state.status !== "error" &&
     !state.missing;
   // Past searches fill the otherwise-empty tray, which is where a recent
-  // list is most useful and costs no extra surface. Once a query is typed
-  // the lexical matches take over the same space.
-  const showHistory = idle && state.query.trim() === "" && state.history.length > 0;
-  const nothingYet = idle && !showHistory;
+  // list is most useful and costs no extra surface. Agent mode only: the
+  // history is a list of questions asked, which is not what name mode does.
+  const showHistory =
+    idle && !nameMode && state.query.trim() === "" && state.history.length > 0;
+  // Name mode with a query and no matches is a real answer ("nothing is
+  // called that"), not an empty waiting state, so it gets its own line.
+  const noNameMatches = nameMode && idle && state.query.trim() !== "";
+  const nothingYet = idle && !showHistory && !noNameMatches;
 
   /** The arrow (if any) the reading path says to follow from row i to i+1. */
   const connectorAfter = (i: number): { from: string; to: string } | null => {
@@ -293,6 +300,46 @@ export function SearchResultsTray({
       // collapse selections behind the tray.
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* What Enter costs, at the top of the panel where the eye lands after
+       *  typing. "Ask an agent" rather than "search": the semantic pass is a
+       *  model call, and saying so is both honest about the wait and a better
+       *  match for what arrives (an answer and a route, not more matches).
+       *  Gone once the agent has answered, since the panel then leads with
+       *  the answer itself. */}
+      {!nameMode && !hasTier1 && state.status !== "loading" && (
+        <div className="flex items-center justify-between gap-2 border-b border-[#E4E3E0] px-3 py-1.5 text-[10.5px] text-[#8A8880]">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <kbd className="shrink-0 rounded border border-[#C9C8C3] bg-[#F2F1EF] px-1 font-sans text-[9.5px] leading-4 text-[#8A8880]">
+              ⏎
+            </kbd>
+            <span className="truncate">to ask an agent</span>
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded px-1 text-[10px] text-[#A09C92] transition-colors hover:bg-black/[0.06] hover:text-[#6E6D68]"
+          >
+            Esc to close
+          </button>
+        </div>
+      )}
+
+      {/* Name mode's own strip. It carries no key hint (there is nothing to
+       *  submit) but it keeps the frame consistent and, more practically,
+       *  keeps Esc reachable in both modes. */}
+      {nameMode && (
+        <div className="flex items-center justify-between gap-2 border-b border-[#E4E3E0] px-3 py-1.5 text-[10.5px] text-[#8A8880]">
+          <span className="truncate">Matching names as you type</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded px-1 text-[10px] text-[#A09C92] transition-colors hover:bg-black/[0.06] hover:text-[#6E6D68]"
+          >
+            Esc to close
+          </button>
+        </div>
+      )}
+
       {state.status === "loading" && (
         <div className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-[#6E6D68]">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-[#2F7A6F]" strokeWidth={2} />
@@ -348,21 +395,11 @@ export function SearchResultsTray({
 
       {showLexical && (
         <div className="px-3 py-2">
-          {/* Named back at the user, because the failure this fixes is
-           *  people reading the instant matches as the answer and never
-           *  submitting. A section heading reads as a label for the list
-           *  under it; quoting the question they typed reads as something
-           *  still waiting to happen. */}
-          <div className="mb-1.5 flex items-center gap-1.5 text-[10.5px] leading-4 text-[#8A8880]">
-            <span className="shrink-0 font-semibold uppercase tracking-wide text-[#A09C92]">
-              Name matches only
-            </span>
-            <kbd className="shrink-0 rounded border border-[#C9C8C3] bg-[#F2F1EF] px-1 font-sans text-[9.5px] text-[#8A8880]">
-              ⏎
-            </kbd>
-            <span className="min-w-0 truncate">
-              to answer “{state.query.trim()}”
-            </span>
+          {/* The same label the answered list carries, so the panel keeps one
+           *  structure and only its contents improve: name matches now, an
+           *  ordered route once the agent has answered. */}
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#A09C92]">
+            Relevant files / modules:
           </div>
           {state.lexicalHits.map((h) => {
             const b = blocks.find((bl) => bl.id === h.blockId);
@@ -470,19 +507,42 @@ export function SearchResultsTray({
         </div>
       )}
 
+      {/* No key-cap here: the strip above already carries it, and saying
+       *  Enter twice in one small panel reads as clutter. */}
       {nothingYet && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2.5 text-[12px] text-[#8A8880]">
-          <span>Describe what you are trying to understand, then press</span>
-          {/* Same key-cap as the field's submit button and the lexical
-           *  header, so Enter is shown the same way everywhere it matters. */}
-          <kbd className="rounded border border-[#C9C8C3] bg-[#F2F1EF] px-1 font-sans text-[9.5px] leading-4 text-[#8A8880]">
-            ⏎
-          </kbd>
+        <div className="px-3 py-2.5 text-[12px] text-[#8A8880]">
+          {nameMode
+            ? "Type part of a block's name or summary."
+            : "Describe what you are trying to understand."}
+        </div>
+      )}
+
+      {noNameMatches && (
+        <div className="px-3 py-2.5 text-[12px] text-[#8A8880]">
+          Nothing on the diagram is named “{state.query.trim()}”. Switch to
+          Agent to ask what handles it.
+        </div>
+      )}
+
+      {/* One visual section, three siblings: the labels, the bracketed list,
+       *  and the close affordance. Kept flat rather than wrapped in a div so
+       *  the long row body below stays at its own indentation. */}
+      {hasTier1 && (
+        <div className="px-3 pt-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#A09C92]">
+            Relevant files / modules:
+          </div>
+          {/* Said once, above the rows it applies to, instead of in a footer
+           *  that claimed a "reading order" even over a list of name matches
+           *  with no order at all. */}
+          <div className="mt-1 text-[10px] text-[#A09C92]">
+            Reading order · click a step to fly there
+          </div>
         </div>
       )}
 
       {hasTier1 && (
-        <ol className="px-2 py-2">
+        <ol className="mb-1 ml-3 mt-1 border-l-2 border-[#DDDBD6] pl-1.5 pr-3">
           {state.hits.map((hit, i) => {
             const block = blocks.find((b) => b.id === hit.blockId);
             const detail = blockDetail[hit.blockId] ?? { kind: "idle" as const };
@@ -643,16 +703,19 @@ export function SearchResultsTray({
         </ol>
       )}
 
-      <div className="flex items-center justify-between border-t border-[#E4E3E0] px-3 py-1.5 text-[10px] text-[#A09C92]">
-        <span>Reading order · click a step to fly there</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded px-1 transition-colors hover:bg-black/[0.06] hover:text-[#6E6D68]"
-        >
-          Esc to close
-        </button>
-      </div>
+      {/* Esc rides in the top strip until an answer displaces it; from then
+       *  on it sits at the end of the result. */}
+      {hasTier1 && (
+        <div className="flex justify-end px-3 pb-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded px-1 text-[10px] text-[#A09C92] transition-colors hover:bg-black/[0.06] hover:text-[#6E6D68]"
+          >
+            Esc to close
+          </button>
+        </div>
+      )}
     </div>
   );
 }
