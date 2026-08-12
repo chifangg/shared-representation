@@ -71,7 +71,7 @@ if [ "${1:-}" = "--check" ]; then
   if command -v claude >/dev/null 2>&1; then
     echo "claude cli: ok"
   else
-    echo "claude cli: MISSING (install Claude Code and log in, see INSTALL.md)"
+    echo "claude cli: MISSING (install Claude Code, see INSTALL.md)"
     ok=0
   fi
   if command -v python3 >/dev/null 2>&1; then

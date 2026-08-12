@@ -19,10 +19,18 @@ session day.
 - **Rust toolchain**: `curl https://sh.rustup.rs -sSf | sh` then
   follow its prompts. On Windows this pulls Visual Studio Build
   Tools, which is a large download and may need administrator rights.
-- **Claude Code CLI**, installed and logged in with your own
-  subscription: `curl -fsSL https://claude.ai/install.sh | bash`
-  (on Windows, in PowerShell: `irm https://claude.ai/install.ps1 | iex`),
-  then run `claude` once and complete the login.
+- **Claude Code CLI**: `curl -fsSL https://claude.ai/install.sh | bash`
+  (on Windows, in PowerShell: `irm https://claude.ai/install.ps1 | iex`).
+  Then run `claude` once. It will ask you to select a login method
+  (subscription, Console account, or a 3rd-party platform). Seeing this
+  screen is normal and expected:
+  - If you already have a Claude subscription (Pro or Max), pick
+    option 1 and complete the login.
+  - If you do not, exit this screen (press Esc or Ctrl+C) and continue
+    with the rest of this guide; everything below works without logging
+    in. You do not need to buy anything, and you will not be asked to
+    pay: as the study's compensation, we gift you one month of Claude
+    Pro at the start of the session, and you will log in then.
 
 **For Windows users:** run everything below from Git Bash or WSL,
 not PowerShell or cmd.
