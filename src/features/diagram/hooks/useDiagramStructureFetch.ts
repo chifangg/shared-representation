@@ -64,9 +64,12 @@ export function useDiagramStructureFetch({
   /** When `.active`, this fetch is an EDIT-driven regen: keep the old
    *  diagram on screen, buffer the stream silently, and swap to the new
    *  layout only once it is fully ready (so the canvas never blanks and
-   *  the user's spatial memory survives the rebuild). The settle-effect
-   *  flips it on; this hook flips it off once the swap lands. */
-  preserveRegenRef?: MutableRefObject<{ active: boolean }>;
+   *  the user's spatial memory survives the rebuild). `anchor` carries
+   *  the serialized pre-edit schema, sent to the backend as base_schema
+   *  so unchanged blocks come back verbatim (stable ids and labels).
+   *  The settle-effect fills both; this hook clears them once the swap
+   *  lands. */
+  preserveRegenRef?: MutableRefObject<{ active: boolean; anchor: string | null }>;
 }): {
   state: FetchState;
   setState: Dispatch<SetStateAction<FetchState>>;
@@ -123,6 +126,13 @@ export function useDiagramStructureFetch({
     // request from before the first generation falls back to streaming.
     const preserve =
       (preserveRegenRef?.current?.active ?? false) && hasEverReadyRef.current;
+    // Anchored regen: ship the pre-edit schema so the backend updates it
+    // in place instead of re-deriving the map (which churns every id).
+    // Only meaningful on the preserve path; a fresh generate has no prior
+    // map worth anchoring to.
+    const baseSchema = preserve
+      ? (preserveRegenRef?.current?.anchor ?? null)
+      : null;
 
     setState({ kind: "loading", startedAt: Date.now() });
     if (!preserve) {
@@ -147,6 +157,7 @@ export function useDiagramStructureFetch({
       try {
         await fetchStructureStream({
           projectContext,
+          baseSchema,
           signal: controller.signal,
           onEvent: (evt) => {
             if (evt.kind === "block") {
@@ -190,11 +201,12 @@ export function useDiagramStructureFetch({
         settled = true;
         setState({ kind: "error", message: String(e) });
       } finally {
-        // An aborted run keeps the preserve request: the restart that
-        // follows (new filesKey, or a chat turn ending) should still
-        // swap in place rather than blank the canvas.
+        // An aborted run keeps the preserve request (anchor included):
+        // the restart that follows (new filesKey, or a chat turn ending)
+        // should still swap in place rather than blank the canvas.
         if (!controller.signal.aborted && preserveRegenRef) {
           preserveRegenRef.current.active = false;
+          preserveRegenRef.current.anchor = null;
         }
       }
     })();

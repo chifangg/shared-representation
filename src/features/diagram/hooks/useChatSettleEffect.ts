@@ -96,8 +96,11 @@ export function useChatSettleEffect({
   chosenOptionsRef: MutableRefObject<Map<string, ChosenOption>>;
   preRegenSnapshotRef: MutableRefObject<PreRegenSnapshot | null>;
   /** Flipped on here so the structure fetch keeps the old diagram up and
-   *  swaps only when the rebuild is ready (no blank during the regen). */
-  preserveRegenRef: MutableRefObject<{ active: boolean }>;
+   *  swaps only when the rebuild is ready (no blank during the regen).
+   *  `anchor` gets the serialized pre-edit schema + edited files so the
+   *  backend updates the existing map in place (stable ids and labels)
+   *  instead of re-deriving everything from scratch. */
+  preserveRegenRef: MutableRefObject<{ active: boolean; anchor: string | null }>;
   setRetryNonce: Dispatch<SetStateAction<number>>;
   setRecentChanges: Dispatch<SetStateAction<RecentChanges | null>>;
   setEditSummary: Dispatch<SetStateAction<EditSummary | null>>;
@@ -349,8 +352,34 @@ export function useChatSettleEffect({
         }
         // Keep the old diagram visible through the rebuild and pulse the
         // edited block(s) the whole time (the chatRunning-based pulse has
-        // already cleared since the turn ended).
+        // already cleared since the turn ended). The anchor ships the
+        // on-screen schema to the backend so the regen re-emits unchanged
+        // blocks verbatim; without it every regen re-derived the whole map
+        // and the churned ids lit up the entire board + flooded the tracker.
         preserveRegenRef.current.active = true;
+        preserveRegenRef.current.anchor =
+          state.kind === "ready"
+            ? JSON.stringify({
+                blocks: state.schema.blocks
+                  .filter((b) => !b.pending)
+                  .map((b) => ({
+                    id: b.id,
+                    label: b.label,
+                    caption: b.caption,
+                    parent: b.parent,
+                    category: b.category,
+                    capabilities: b.capabilities,
+                    provenance: b.provenance,
+                  })),
+                arrows: state.schema.arrows
+                  .filter((a) => !a.pending)
+                  .map((a) => ({ from: a.from, to: a.to, label: a.label })),
+              }) +
+              "\n\nFILES EDITED SINCE THIS DIAGRAM WAS GENERATED:\n" +
+              Array.from(editedFiles)
+                .map((f) => `- ${f}`)
+                .join("\n")
+            : null;
         setEditRegenIds(new Set(editedBlockIds));
         setState({ kind: "idle" });
         setRetryNonce((n) => n + 1);

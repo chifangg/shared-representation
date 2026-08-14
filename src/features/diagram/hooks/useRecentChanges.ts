@@ -102,85 +102,153 @@ export function useRecentChanges({
     if (!preRegenSnapshotRef.current) return;
     const snap = preRegenSnapshotRef.current;
     preRegenSnapshotRef.current = null;
-    const newBlockIds = new Set<string>();
-    for (const b of state.schema.blocks) {
-      if (b.pending) continue;
-      if (!snap.blockIds.has(b.id)) newBlockIds.add(b.id);
-    }
-    // Carry over blocks Claude edited in place (same id, existed before):
-    // the diff above can't see them, but the user still wants the block
-    // that changed to glow.
-    for (const id of snap.editedBlockIds) {
-      if (state.schema.blocks.some((b) => b.id === id && !b.pending)) {
-        newBlockIds.add(id);
+    // ---- Structural diff, computed ONCE and shared by the glow and the
+    // tracker delta. The glow used to be a raw id-diff with none of the
+    // coalescing below, so an id-churning regen lit up the whole board
+    // even when one line changed; now both consumers see the same
+    // churn-corrected picture. ----
+    const currentById = new Map(
+      state.schema.blocks.filter((b) => !b.pending).map((b) => [b.id, b]),
+    );
+    const nameOf = (id: string) =>
+      currentById.get(id)?.label ?? snap.blockMeta.get(id)?.label ?? id;
+    const catOf = (id: string) =>
+      currentById.get(id)?.category ?? snap.blockMeta.get(id)?.category;
+    // Raw added / removed carry files so a re-keyed-but-same block (the LLM
+    // gave the same capability a fresh id across the regen) can be spotted.
+    type Raw = DeltaBlock & { files: string[] };
+    const addedRaw: Raw[] = [];
+    for (const b of currentById.values()) {
+      if (!snap.blockIds.has(b.id) && !snap.editedBlockIds.has(b.id)) {
+        addedRaw.push({
+          id: b.id,
+          label: b.label,
+          category: b.category,
+          files: b.provenance?.files ?? [],
+        });
       }
     }
-    const newArrowKeys = new Set<string>();
+    const removedRaw: Raw[] = [];
+    for (const id of snap.blockIds) {
+      if (!currentById.has(id)) {
+        const m = snap.blockMeta.get(id);
+        removedRaw.push({
+          id,
+          label: m?.label ?? id,
+          category: m?.category,
+          files: m?.files ?? [],
+        });
+      }
+    }
+    // Coalesce: a removed + added pair sharing a category AND at least one
+    // provenance file is almost certainly the SAME capability whose id
+    // churned across the regen (ids are label-derived). The anchored regen
+    // keeps ids stable at the source, so this is the safety net for the
+    // churn that still slips through. Drop both so an LLM relabel doesn't
+    // surface as a spurious remove + add. (A genuine rename is suppressed
+    // too; that's the cost of the safety net.)
+    const matchedAdded = new Set<string>();
+    const matchedRemoved = new Set<string>();
+    for (const r of removedRaw) {
+      const rf = new Set(r.files);
+      const a = addedRaw.find(
+        (x) =>
+          !matchedAdded.has(x.id) &&
+          x.category === r.category &&
+          x.files.some((f) => rf.has(f)),
+      );
+      if (a) {
+        matchedAdded.add(a.id);
+        matchedRemoved.add(r.id);
+      }
+    }
+    // Edited existing blocks. Three sources, unioned + de-duped by id, so a
+    // real edit shows exactly one "edited" row even when block ids churn
+    // across the regen (ids are label-derived) or provenance is spotty:
+    //   1. POST-regen file mapping for blocks that existed before (non-churn).
+    //   2. Re-keyed edits: a COALESCED added block (its id churned) that also
+    //      owns an edited file. Without this a churned edit-in-place records
+    //      nothing (coalescing drops it from added/removed; #1 misses it
+    //      because the new id isn't in the snapshot).
+    //   3. PRE-regen fallback: blocks the settle effect already mapped,
+    //      still present by the same id, in case the post-regen provenance
+    //      dropped a file the pre-regen one had.
+    const editedIds = new Set<string>();
+    if (snap.editedFiles.length > 0) {
+      const hitIds = blocksForFiles(
+        state.schema.blocks.filter((b) => !b.pending),
+        snap.editedFiles,
+      );
+      for (const id of hitIds) {
+        if (snap.blockIds.has(id) || matchedAdded.has(id)) editedIds.add(id);
+      }
+    }
+    for (const id of snap.editedBlockIds) {
+      if (currentById.has(id)) editedIds.add(id);
+    }
+    // Arrow diff with the same churn correction: arrow keys are built from
+    // block IDS, so a regen that re-ids an endpoint makes the SAME visual
+    // arrow show up as removed (old ids) plus added (new ids). Cancel out
+    // pairs whose endpoint LABELS match; reporting them minted phantom
+    // "linked"/"unlinked" tracker rows (and glows) for arrows that never
+    // visibly changed.
+    const currentArrowKeys = new Set(
+      state.schema.arrows
+        .filter((a) => !a.pending)
+        .map((a) => `${a.from}->${a.to}`),
+    );
+    const addedArrows: DeltaArrow[] = [];
     for (const a of state.schema.arrows) {
       if (a.pending) continue;
-      const key = `${a.from}->${a.to}`;
-      if (!snap.arrowKeys.has(key)) newArrowKeys.add(key);
+      if (snap.arrowKeys.has(`${a.from}->${a.to}`)) continue;
+      addedArrows.push({
+        from: a.from,
+        to: a.to,
+        fromLabel: nameOf(a.from),
+        toLabel: nameOf(a.to),
+        fromCategory: catOf(a.from),
+        toCategory: catOf(a.to),
+      });
     }
+    const removedArrows: DeltaArrow[] = [];
+    for (const key of snap.arrowKeys) {
+      if (currentArrowKeys.has(key)) continue;
+      const [from, to] = key.split("->");
+      removedArrows.push({
+        from,
+        to,
+        fromLabel: nameOf(from),
+        toLabel: nameOf(to),
+        fromCategory: catOf(from),
+        toCategory: catOf(to),
+      });
+    }
+    const labelPair = (a: DeltaArrow) =>
+      `${a.fromLabel.toLowerCase()}|${a.toLabel.toLowerCase()}`;
+    const removedPairs = new Set(removedArrows.map(labelPair));
+    const addedPairs = new Set(addedArrows.map(labelPair));
+    const realAddedArrows = addedArrows.filter(
+      (a) => !removedPairs.has(labelPair(a)),
+    );
+    const realRemovedArrows = removedArrows.filter(
+      (a) => !addedPairs.has(labelPair(a)),
+    );
 
-    // Structural delta for the interaction tracker: added / removed blocks +
-    // arrows, in diagram terms. Edited blocks are intentionally excluded here
-    // (the settle effect's editSummary records those, and also catches
-    // no-regen edits), so we never double-count an edit.
+    // GLOW: genuinely-added blocks (churn pairs excluded) plus the blocks
+    // whose files were edited, and genuinely-added arrows. Everything the
+    // user should look at, nothing that merely re-keyed.
+    const newBlockIds = new Set<string>();
+    for (const b of addedRaw) {
+      if (!matchedAdded.has(b.id)) newBlockIds.add(b.id);
+    }
+    for (const id of editedIds) newBlockIds.add(id);
+    const newArrowKeys = new Set(
+      realAddedArrows.map((a) => `${a.from}->${a.to}`),
+    );
+
+    // Structural delta for the interaction tracker, from the same
+    // churn-corrected diff as the glow above.
     if (onDelta) {
-      const currentById = new Map(
-        state.schema.blocks.filter((b) => !b.pending).map((b) => [b.id, b]),
-      );
-      const nameOf = (id: string) =>
-        currentById.get(id)?.label ?? snap.blockMeta.get(id)?.label ?? id;
-      const catOf = (id: string) =>
-        currentById.get(id)?.category ?? snap.blockMeta.get(id)?.category;
-      // Raw added / removed carry files so a re-keyed-but-same block (the LLM
-      // gave the same capability a fresh id across the regen) can be spotted.
-      type Raw = DeltaBlock & { files: string[] };
-      const addedRaw: Raw[] = [];
-      for (const b of currentById.values()) {
-        if (!snap.blockIds.has(b.id) && !snap.editedBlockIds.has(b.id)) {
-          addedRaw.push({
-            id: b.id,
-            label: b.label,
-            category: b.category,
-            files: b.provenance?.files ?? [],
-          });
-        }
-      }
-      const removedRaw: Raw[] = [];
-      for (const id of snap.blockIds) {
-        if (!currentById.has(id)) {
-          const m = snap.blockMeta.get(id);
-          removedRaw.push({
-            id,
-            label: m?.label ?? id,
-            category: m?.category,
-            files: m?.files ?? [],
-          });
-        }
-      }
-      // Coalesce: a removed + added pair sharing a category AND at least one
-      // provenance file is almost certainly the SAME capability whose id
-      // churned across the regen (ids are label-derived and the structure view
-      // isn't anchored to the old schema). Drop both so an LLM relabel doesn't
-      // surface as a spurious remove + add. (A genuine rename is suppressed
-      // too; surfacing those needs the backend to preserve ids.)
-      const matchedAdded = new Set<string>();
-      const matchedRemoved = new Set<string>();
-      for (const r of removedRaw) {
-        const rf = new Set(r.files);
-        const a = addedRaw.find(
-          (x) =>
-            !matchedAdded.has(x.id) &&
-            x.category === r.category &&
-            x.files.some((f) => rf.has(f)),
-        );
-        if (a) {
-          matchedAdded.add(a.id);
-          matchedRemoved.add(r.id);
-        }
-      }
       const strip = (b: Raw): DeltaBlock => ({
         id: b.id,
         label: b.label,
@@ -192,61 +260,6 @@ export function useRecentChanges({
       const removedBlocks: DeltaBlock[] = removedRaw
         .filter((b) => !matchedRemoved.has(b.id))
         .map(strip);
-      const currentArrowKeys = new Set(
-        state.schema.arrows
-          .filter((a) => !a.pending)
-          .map((a) => `${a.from}->${a.to}`),
-      );
-      const addedArrows: DeltaArrow[] = [];
-      for (const a of state.schema.arrows) {
-        if (a.pending) continue;
-        if (snap.arrowKeys.has(`${a.from}->${a.to}`)) continue;
-        addedArrows.push({
-          from: a.from,
-          to: a.to,
-          fromLabel: nameOf(a.from),
-          toLabel: nameOf(a.to),
-          fromCategory: catOf(a.from),
-          toCategory: catOf(a.to),
-        });
-      }
-      const removedArrows: DeltaArrow[] = [];
-      for (const key of snap.arrowKeys) {
-        if (currentArrowKeys.has(key)) continue;
-        const [from, to] = key.split("->");
-        removedArrows.push({
-          from,
-          to,
-          fromLabel: nameOf(from),
-          toLabel: nameOf(to),
-          fromCategory: catOf(from),
-          toCategory: catOf(to),
-        });
-      }
-      // Edited existing blocks. Three sources, unioned + de-duped by id, so a
-      // real edit shows exactly one "edited" row even when block ids churn
-      // across the regen (ids are label-derived) or provenance is spotty:
-      //   1. POST-regen file mapping for blocks that existed before (non-churn).
-      //   2. Re-keyed edits: a COALESCED added block (its id churned) that also
-      //      owns an edited file. Without this a churned edit-in-place records
-      //      nothing (coalescing drops it from added/removed; #1 misses it
-      //      because the new id isn't in the snapshot).
-      //   3. PRE-regen fallback: blocks the settle effect already mapped,
-      //      still present by the same id, in case the post-regen provenance
-      //      dropped a file the pre-regen one had.
-      const editedIds = new Set<string>();
-      if (snap.editedFiles.length > 0) {
-        const hitIds = blocksForFiles(
-          state.schema.blocks.filter((b) => !b.pending),
-          snap.editedFiles,
-        );
-        for (const id of hitIds) {
-          if (snap.blockIds.has(id) || matchedAdded.has(id)) editedIds.add(id);
-        }
-      }
-      for (const id of snap.editedBlockIds) {
-        if (currentById.has(id)) editedIds.add(id);
-      }
       const editedBlocks: DeltaBlock[] = [];
       for (const id of editedIds) {
         const b = currentById.get(id);
@@ -254,22 +267,6 @@ export function useRecentChanges({
           editedBlocks.push({ id: b.id, label: b.label, category: b.category });
         }
       }
-      // Arrow keys are built from block IDS, and ids are label-derived, so
-      // a regen that re-ids an endpoint makes the SAME visual arrow show
-      // up as removed (old ids) plus added (new ids). Cancel out pairs
-      // whose endpoint LABELS match: those are id-churn artifacts, and
-      // reporting them minted phantom "linked"/"unlinked" tracker rows for
-      // arrows that never visibly changed.
-      const labelPair = (a: DeltaArrow) =>
-        `${a.fromLabel.toLowerCase()}|${a.toLabel.toLowerCase()}`;
-      const removedPairs = new Set(removedArrows.map(labelPair));
-      const addedPairs = new Set(addedArrows.map(labelPair));
-      const realAddedArrows = addedArrows.filter(
-        (a) => !removedPairs.has(labelPair(a)),
-      );
-      const realRemovedArrows = removedArrows.filter(
-        (a) => !addedPairs.has(labelPair(a)),
-      );
       if (
         addedBlocks.length ||
         removedBlocks.length ||

@@ -23,6 +23,13 @@ If a `<user_goal>` block appears inside `<project_context>`, READ IT FIRST and l
 - Capabilities the user did NOT mention should still appear (this is an overview, not a slice) but at coarser granularity — one block, brief caption, lighter provenance.\n\
 - If the goal mentions a role (e.g. \"security engineer\", \"frontend developer\"), pick the decomposition that matches that lens. A security engineer on a webapp wants \"Data inputs & forms\", \"Authentication\", \"External resource loading\" surfaced; a frontend developer on the same app wants \"Theming\", \"Component composition\", \"Interactions\" surfaced.\n\
 - If no `<user_goal>` is present, produce a balanced generic capability map covering all major user-facing aspects.\n\n\
+ANCHORED UPDATE:\n\
+If the user message contains a `CURRENT DIAGRAM (UPDATE IN PLACE)` block, you are UPDATING an existing map after a code edit, NOT drawing a fresh one. The user has spatial memory of this diagram and every gratuitous change destroys it. Stability is the top priority:\n\
+- Re-emit every block the edit does not affect VERBATIM: exactly the same id, label, caption, category, capabilities (same wording, same order), and provenance. Do not rename, rephrase, re-split, or merge them.\n\
+- Only a block whose provenance overlaps the listed edited files may change, and only as much as the edit warrants: update its caption, capabilities, or provenance while KEEPING its id and label unless the capability itself genuinely changed.\n\
+- Add a new block ONLY if the edit introduced a genuinely new capability that fits no existing block. Remove a block ONLY if its capability no longer exists in the code. A small code edit almost never changes the set of blocks.\n\
+- Re-emit the arrows unchanged (same from, to, label) unless the edit changed a relationship.\n\
+- Keep the original emission order for existing blocks; insert any new block where it fits the flow.\n\n\
 RULES:\n\
 - 4 to 8 blocks, and NEVER more than 8. This is a hard limit, not a target. If a richer codebase tempts you past 8, MERGE the most closely related capabilities into one coarser block (and use its `capabilities` list for the detail) rather than emitting a ninth. Fewer, well-chosen blocks read better than an exhaustive one. Use the `parent` field if multiple blocks naturally nest under one larger capability.\n\
 - Stable readable id derived from label (e.g. \"content_sections\", \"theming\").\n\

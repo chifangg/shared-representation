@@ -131,11 +131,21 @@ pub async fn generate_diagram(Json(req): Json<DiagramRequest>) -> Response {
         .map(|s| format!("\n\nRECENT CHAT (most recent last):\n{}\n", s))
         .unwrap_or_default();
 
+    // Header is view-dependent: the focus view treats the schema as
+    // read-only context ("these blocks exist, add detail under them"),
+    // while the structure view treats it as the thing being updated in
+    // place (the anchored-regen path; see STRUCTURE_SYSTEM).
     let base_block = req
         .base_schema
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .map(|s| format!("\n\nEXISTING OVERVIEW BLOCKS:\n{}\n", s))
+        .map(|s| {
+            if req.view == "structure" {
+                format!("\n\nCURRENT DIAGRAM (UPDATE IN PLACE):\n{}\n", s)
+            } else {
+                format!("\n\nEXISTING OVERVIEW BLOCKS:\n{}\n", s)
+            }
+        })
         .unwrap_or_default();
 
     let instruction_block = req

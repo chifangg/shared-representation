@@ -48,10 +48,15 @@ function parseStructureLine(line: string): StructureStreamEvent | null {
 
 export async function fetchStructureStream({
   projectContext,
+  baseSchema,
   signal,
   onEvent,
 }: {
   projectContext: string;
+  /** Serialized on-screen schema for an ANCHORED regen: the backend
+   *  re-emits unchanged blocks verbatim instead of re-deriving the map
+   *  (which churns every id and label). Null/absent = fresh generate. */
+  baseSchema?: string | null;
   signal: AbortSignal;
   onEvent: (evt: StructureStreamEvent) => void;
 }): Promise<void> {
@@ -62,6 +67,7 @@ export async function fetchStructureStream({
       body: JSON.stringify({
         project_context: projectContext,
         view: "structure",
+        ...(baseSchema ? { base_schema: baseSchema } : {}),
       }),
       signal,
     }),

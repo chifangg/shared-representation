@@ -170,8 +170,14 @@ function DiagramCanvasInner({
   const preRegenSnapshotRef = useRef<PreRegenSnapshot | null>(null);
   // While an edit-driven regen runs, keep the old diagram up + pulse the
   // edited block(s) instead of blanking. The ref gates the fetch hook;
-  // editRegenIds drives the pulse and clears on the next ready.
-  const preserveRegenRef = useRef<{ active: boolean }>({ active: false });
+  // editRegenIds drives the pulse and clears on the next ready. `anchor`
+  // carries the serialized pre-edit schema so the regen updates the
+  // existing map in place instead of re-deriving it from scratch (which
+  // churned every block id and label).
+  const preserveRegenRef = useRef<{ active: boolean; anchor: string | null }>({
+    active: false,
+    anchor: null,
+  });
   const [editRegenIds, setEditRegenIds] = useState<Set<string>>(new Set());
   // Blocks queued for an in-place capability/caption refresh after a
   // no-regen edit (filled by the settle effect, drained by the hook).
