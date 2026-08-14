@@ -231,9 +231,21 @@ export function buildBubbleAndSectorNodes(args: {
     zIndex: -1,
   };
 
+  // Assign items to fan slots in VISUAL reading order: sort the slots
+  // top-to-bottom (left-to-right on ties) and give the first capability
+  // the topmost slot. The angular fan order zig-zags on screen, so
+  // badge 1..N used to jump around the arc; after this the eye can
+  // follow 1, 2, 3 straight down the fan.
+  const slotByItem = positions
+    .map((_, i) => i)
+    .sort(
+      (a, b) =>
+        positions[a].y - positions[b].y || positions[a].x - positions[b].x,
+    );
   const bubbles: Node<BubbleNodeData>[] = items.map((item, i) => {
-    const posX = positions[i].x - BUBBLE_HALF_SIZE;
-    const posY = positions[i].y - BUBBLE_HALF_SIZE;
+    const slot = positions[slotByItem[i]];
+    const posX = slot.x - BUBBLE_HALF_SIZE;
+    const posY = slot.y - BUBBLE_HALF_SIZE;
     // Offset from bubble center to block center: the radial-outward
     // animation starts at the block center (transform = this delta)
     // and tweens to (0,0).
