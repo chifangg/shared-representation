@@ -11,26 +11,13 @@
       rel="stylesheet"
     />
     <script>
-      // Apply the persisted theme before React mounts to avoid a
-      // flash-of-wrong-theme. Mirrors the logic in useTheme.ts —
-      // keep the two in sync if you add more themes.
-      (function () {
-        try {
-          var stored = localStorage.getItem("ui-theme");
-          var prefersLight =
-            stored == null &&
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: light)").matches;
-          var theme =
-            stored === "light" || stored === "dark"
-              ? stored
-              : prefersLight
-              ? "light"
-              : "dark";
-          if (theme === "light") document.documentElement.classList.add("theme-light");
-          document.documentElement.style.colorScheme = theme;
-        } catch (_) {}
-      })();
+      // The app's UI is authored light-only, but the template's dark
+      // tokens still drive borders, body text and chat surfaces. On a
+      // dark-mode machine the old follow-the-OS logic rendered a broken
+      // half-dark hybrid (near-black borders, washed-out chat text), so
+      // the light theme is forced unconditionally before React mounts.
+      document.documentElement.classList.add("theme-light");
+      document.documentElement.style.colorScheme = "light";
     </script>
   </head>
 

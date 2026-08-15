@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
  * Minimal two-mode theme hook (dark / light).
  *
  * How it works:
- *  - Default is dark (matches the `@theme` block in styles.css).
- *  - Light mode is switched on by adding `theme-light` to the <html> element.
- *    The CSS in styles.css overrides the color tokens under that class.
- *  - The choice is persisted in localStorage under `ui-theme`, so reloading
- *    keeps the user's preference.
- *  - If the user hasn't made a choice, we honour `prefers-color-scheme`.
+ *  - Default is LIGHT. The app's own UI is authored light-only, so the
+ *    OS appearance is deliberately ignored: following it rendered a
+ *    broken half-dark hybrid on dark-mode machines (the dark tokens
+ *    only cover the template's base layer, not the app's components).
+ *  - Dark mode is the `@theme` block in styles.css; light mode adds
+ *    `theme-light` to the <html> element, which overrides the tokens.
+ *  - An explicit choice is persisted in localStorage under `ui-theme`.
  *
  * Forks that want more palettes can add `.theme-<name>` blocks to
  * styles.css alongside the existing `.theme-light` and extend the Theme
@@ -20,13 +21,10 @@ export type Theme = "dark" | "light";
 const STORAGE_KEY = "ui-theme";
 
 function readInitialTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored === "dark" || stored === "light") return stored;
-  const prefersLight =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-color-scheme: light)").matches;
-  return prefersLight ? "light" : "dark";
+  return "light";
 }
 
 function applyTheme(theme: Theme) {
