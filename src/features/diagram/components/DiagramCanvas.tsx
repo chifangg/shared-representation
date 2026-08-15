@@ -815,6 +815,14 @@ function DiagramCanvasInner({
           : dimEdge(e),
       );
     }
+    // Name-mode matches narrow the canvas too, but carry no reading
+    // path, so there is nothing to light up: every arrow just dims with
+    // the non-matching blocks. Without this branch the arrows floated
+    // at full strength over the ghosted map (only the agent branch
+    // above dimmed them).
+    if (search.state.highlightIds.length > 0) {
+      return edgesWithRoutes.map(dimEdge);
+    }
     return edgesWithRoutes;
   }, [
     edgesWithRoutes,
@@ -822,6 +830,7 @@ function DiagramCanvasInner({
     lens,
     search.state.hits,
     search.state.path,
+    search.state.highlightIds,
   ]);
 
 
