@@ -469,8 +469,15 @@ function projectTurns(messages: ClaudeMessage[]): Turn[] {
       const blocks: AssistantBlock[] = [];
       for (const b of inner) {
         if (b?.type === "text") blocks.push({ kind: "text", text: b.text });
-        else if (b?.type === "thinking")
-          blocks.push({ kind: "thinking", text: b.thinking ?? "" });
+        else if (b?.type === "thinking") {
+          // Newer models (Sonnet 5, Opus 4.8) stream thinking blocks
+          // with NO text on subscription sessions; an expandable row
+          // with nothing inside reads as broken, so empty ones are
+          // dropped instead of rendered.
+          if ((b.thinking ?? "").trim()) {
+            blocks.push({ kind: "thinking", text: b.thinking });
+          }
+        }
         else if (b?.type === "tool_use") {
           blocks.push({ kind: "tool_use", id: b.id, name: b.name, input: b.input });
         }
