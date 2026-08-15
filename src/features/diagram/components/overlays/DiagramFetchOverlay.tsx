@@ -1,4 +1,5 @@
 import { AlertCircle, Loader2, Upload } from "lucide-react";
+import { useProject } from "@/core/project";
 import type { FetchState } from "../../types";
 import { DiagramLoadingCard } from "../nodes/DiagramLoadingCard";
 import { ElapsedClock } from "../nodes/ElapsedClock";
@@ -24,11 +25,18 @@ export function DiagramFetchOverlay({
   nodeCount: number;
   onRetry: () => void;
 }) {
+  // Files stay empty for the whole upload, so without this guard the
+  // nudge coexists with the AppShell's "Loading project" overlay: stale
+  // advice showing through the scrim (and on one glitchy GPU, painted
+  // over the loading card itself).
+  const { uploading } = useProject();
+
   // Before any project exists the canvas is a blank grid, so the
   // "upload something" nudge lives here rather than in the chat panel:
   // the empty diagram is the biggest thing on screen, and the Files
   // rail it points at sits directly beside it.
   if (!hasFiles) {
+    if (uploading) return null;
     return (
       <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 px-4 text-center text-sm text-[#9A9081]">
         <Upload size={28} className="opacity-40" />
