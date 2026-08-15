@@ -22,13 +22,18 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-/** Model the chat spawns when the caller does not pick one. Alias, not
- *  a pinned ID, so the CLI resolves it to the newest model of that tier
- *  the account offers. Sonnet because study participants run on gifted
- *  Pro subscriptions, which do not include Opus; a build can override
+/** Model the chat spawns when the caller does not pick one. A pinned
+ *  ID, deliberately NOT the "sonnet" alias: the alias resolves per
+ *  account, and the study's gifted Pro accounts resolved it to Sonnet 5,
+ *  whose thinking blocks come back EMPTY on subscription sessions (the
+ *  UI then shows expandable thinking rows with nothing inside). Pinning
+ *  one snapshot keeps every participant on the same model, with visible
+ *  thinking and comparable behavior across accounts. The baseline
+ *  condition pins the same snapshot in the task repo's
+ *  .claude/settings.json; keep the two in sync. A build can override
  *  via VITE_CHAT_MODEL (e.g. for local dev on a Max account). */
 export const DEFAULT_CHAT_MODEL: string =
-  (import.meta.env.VITE_CHAT_MODEL as string | undefined) ?? "sonnet";
+  (import.meta.env.VITE_CHAT_MODEL as string | undefined) ?? "claude-sonnet-4-6";
 
 const STREAMING_COMMANDS = new Set([
   "execute_claude_code",
